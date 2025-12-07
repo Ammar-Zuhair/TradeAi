@@ -9,7 +9,7 @@ import { Platform } from 'react-native';
 // 1. Open Command Prompt (cmd)
 // 2. Type 'ipconfig'
 // 3. Look for "IPv4 Address" (e.g., 192.168.1.5)
-const SERVER_IP = '192.168.8.146';
+const SERVER_IP = '192.168.1.100';
 const SERVER_PORT = '3000';
 // ---------------------------------------------------------------------------
 
@@ -200,6 +200,15 @@ export const tradeService = {
 
     getTrade: async (token: string, tradeId: number) => {
         const response = await api.get(`/trades/${tradeId}`, {
+            headers: {
+                Authorization: `Bearer ${token}`
+            }
+        });
+        return response.data;
+    },
+
+    closeAllTrades: async (token: string, accountId: number) => {
+        const response = await api.post(`/trades/close-all/${accountId}`, {}, {
             headers: {
                 Authorization: `Bearer ${token}`
             }

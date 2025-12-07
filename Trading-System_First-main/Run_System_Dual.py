@@ -34,8 +34,13 @@ import time
 import math
 import warnings
 import logging
+import logging
+import csv
 from datetime import datetime, timedelta
 from tensorflow import keras
+
+
+
 
 from BackEnd import database
 
@@ -222,6 +227,30 @@ class AccountMonitor:
         except:
             return MIN_LOT_SIZE
     
+    def _log_trade_attempt_csv(self, action, price, sl, tp, lot_size, strategy_name):
+        try:
+            csv_file = os.path.join(self.script_dir, 'trade_attempts.csv')
+            file_exists = os.path.exists(csv_file)
+            
+            with open(csv_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(['Time', 'Strategy', 'Symbol', 'Action', 'Price', 'SL', 'TP', 'LotSize'])
+                
+                writer.writerow([
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    strategy_name,
+                    SYMBOL,
+                    action,
+                    price,
+                    sl,
+                    tp,
+                    lot_size
+                ])
+            self.logger.info(f"📝 Trade attempt logged to CSV: {action} @ {price}")
+        except Exception as e:
+            self.logger.error(f"❌ Failed to log trade attempt to CSV: {e}")
+
     def execute_fvg_trade(self, zone, action):
         if not ENABLE_AUTO_TRADING:
             self.logger.info(f"ℹ️ Recommendation: {action} (Auto-trading OFF)")
@@ -261,6 +290,9 @@ class AccountMonitor:
             sl_distance_mt5_points = abs(sl - price) / point
             lot_size = self.calculate_lot_size(sl_distance_mt5_points)
             
+            # Log attempt before execution
+            self._log_trade_attempt_csv(action, price, sl, tp, lot_size, f"{self.strategy_type.upper()}_FVG")
+            
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": SYMBOL,
@@ -288,11 +320,11 @@ class AccountMonitor:
                 try:
                     db: Session = SessionLocal()
                     # Find account ID based on login
-                    account = db.query(Account).filter(Account.AccountLoginNumber == self.credentials['login']).first()
                     if account:
                         new_trade = Trade(
+                            TradeID=result.order, # Use Ticket as ID
                             AccountID=account.AccountID,
-                            TradeTicket=result.order, # Save Ticket
+                            # TradeTicket removed
                             TradeType=action,
                             TradeAsset=SYMBOL,
                             TradeLotsize=lot_size,
@@ -303,6 +335,21 @@ class AccountMonitor:
                         db.add(new_trade)
                         db.commit()
                         self.logger.info(f"💾 Trade saved to DB (ID: {new_trade.TradeID}, Ticket: {result.order})")
+                        
+                        # Send Notification
+                        try:
+                            user = db.query(User).filter(User.UserID == account.UserID).first()
+                            if user and user.IsNotificationsEnabled and user.PushToken:
+                                from utils.notifications import send_push_notification
+                                send_push_notification(
+                                    token=user.PushToken,
+                                    title="New Auto Trade 🤖",
+                                    body=f"{action} {SYMBOL} @ {result.price}",
+                                    data={"trade_id": new_trade.TradeID}
+                                )
+                        except Exception as e:
+                            self.logger.error(f"⚠️ Failed to send notification: {e}")
+
                     db.close()
                 except Exception as e:
                     self.logger.error(f"❌ Failed to save trade to DB: {e}")
@@ -611,6 +658,9 @@ class VotingStrategyMonitor(AccountMonitor):
             sl_distance_mt5_points = abs(sl - price) / point
             lot_size = self.calculate_lot_size(sl_distance_mt5_points)
             
+            # Log attempt before execution
+            self._log_trade_attempt_csv(action, price, sl, tp, lot_size, "VOTING_ONLY")
+            
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": SYMBOL,
@@ -639,8 +689,9 @@ class VotingStrategyMonitor(AccountMonitor):
                     account = db.query(Account).filter(Account.AccountLoginNumber == self.credentials['login']).first()
                     if account:
                         new_trade = Trade(
+                            TradeID=result.order, # Use Ticket as ID
                             AccountID=account.AccountID,
-                            TradeTicket=result.order, # Save Ticket
+                            # TradeTicket removed
                             TradeType=action,
                             TradeAsset=SYMBOL,
                             TradeLotsize=lot_size,
@@ -947,24 +998,20 @@ class TradeMonitor:
         """Check trades for a specific account (inside MT5 context)"""
         for trade in trades:
             try:
-                if not trade.TradeTicket:
-                    continue
-                    
+                # TradeID is the Ticket
+                ticket = trade.TradeID
+                
                 # Check if position exists (Open)
-                positions = mt5.positions_get(ticket=trade.TradeTicket)
+                positions = mt5.positions_get(ticket=ticket)
                 
                 if positions and len(positions) > 0:
                     # Trade is still OPEN
                     pos = positions[0]
                     trade.TradeProfitLose = pos.profit
-                    # Update other fields if needed (e.g. SL/TP changes)
-                    # db.commit() # Commit later or now?
-                    # self.logger.info(f"🔄 Updated Trade {trade.TradeTicket}: P/L {pos.profit}")
                 else:
                     # Trade is NOT in positions -> CLOSED
                     # Check history to confirm and get final profit
-                    # Try to get history by position ID (Ticket)
-                    deals = mt5.history_deals_get(position=trade.TradeTicket)
+                    deals = mt5.history_deals_get(position=ticket)
                     
                     if deals and len(deals) > 0:
                         # Calculate total profit for this position
@@ -978,17 +1025,26 @@ class TradeMonitor:
                         trade.TradeClosePrice = last_deal.price
                         trade.TradeCloseTime = datetime.fromtimestamp(last_deal.time)
                         
-                        self.logger.info(f"✅ Trade {trade.TradeTicket} CLOSED. Profit: {total_profit}")
+                        # UPDATE ACCOUNT BALANCE
+                        account = db.query(Account).filter(Account.AccountID == trade.AccountID).first()
+                        if account:
+                            # Ensure we are working with Decimal/Float correctly
+                            # AccountBalance is DECIMAL, total_profit is float from MT5
+                            from decimal import Decimal
+                            account.AccountBalance = account.AccountBalance + Decimal(str(total_profit))
+                            self.logger.info(f"💰 Balance Updated: {account.AccountBalance} (Profit: {total_profit})")
+                        
+                        self.logger.info(f"✅ Trade {ticket} CLOSED. Profit: {total_profit}")
                     else:
                         # Could not find in history? Maybe just closed?
                         # Mark as Closed/Unknown or assume manual close
                         trade.TradeStatus = 'Closed'
-                        self.logger.warning(f"⚠️ Trade {trade.TradeTicket} not found in history")
+                        self.logger.warning(f"⚠️ Trade {ticket} not found in history")
                 
                 db.commit()
                 
             except Exception as e:
-                self.logger.error(f"❌ Error checking trade {trade.TradeTicket}: {e}")
+                self.logger.error(f"❌ Error checking trade {trade.TradeID}: {e}")
 
     def run(self):
         self.logger.info("\n" + "="*60)

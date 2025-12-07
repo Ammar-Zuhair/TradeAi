@@ -28,8 +28,9 @@ async def create_trade(
     
     # Create new trade
     new_trade = Trade(
+        TradeID=trade.TradeID, # Use provided ID (Ticket)
         AccountID=trade.AccountID,
-        TradeTicket=trade.TradeTicket,
+        # TradeTicket removed
         TradeType=trade.TradeType,
         TradeAsset=trade.TradeAsset,
         TradeLotsize=trade.TradeLotsize,
@@ -41,6 +42,19 @@ async def create_trade(
     db.add(new_trade)
     db.commit()
     db.refresh(new_trade)
+    
+    # Send Notification
+    try:
+        if current_user.IsNotificationsEnabled and current_user.PushToken:
+            from utils.notifications import send_push_notification
+            send_push_notification(
+                token=current_user.PushToken,
+                title="New Trade Opened 🚀",
+                body=f"{trade.TradeType} {trade.TradeAsset} @ {trade.TradeOpenPrice}",
+                data={"trade_id": new_trade.TradeID}
+            )
+    except Exception as e:
+        print(f"⚠️ Failed to send notification: {e}")
     
     return new_trade
 
@@ -106,3 +120,48 @@ async def update_trade(
     db.refresh(trade)
     
     return trade
+
+
+@router.post("/close-all/{account_id}", status_code=status.HTTP_200_OK)
+async def close_all_trades(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Close all open trades for a specific account"""
+    # Verify account exists
+    account = db.query(Account).filter(Account.AccountID == account_id).first()
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found"
+        )
+    
+    # Find all open trades
+    open_trades = db.query(Trade).filter(
+        Trade.AccountID == account_id,
+        Trade.TradeStatus == 'Open'
+    ).all()
+    
+    if not open_trades:
+        return {"message": "No open trades to close", "count": 0}
+    
+    from datetime import datetime
+    
+    count = 0
+    for trade in open_trades:
+        trade.TradeStatus = 'Closed'
+        trade.TradeCloseTime = datetime.now()
+        # In a real scenario, we would need the close price and calculate profit
+        # For now, we'll just mark them as closed. 
+        # Optionally set close price = open price (break even) if unknown
+        if not trade.TradeClosePrice:
+            trade.TradeClosePrice = trade.TradeOpenPrice
+        if not trade.TradeProfitLose:
+            trade.TradeProfitLose = 0.0
+            
+        count += 1
+        
+    db.commit()
+    
+    return {"message": f"Successfully closed {count} trades", "count": count}

@@ -45,6 +45,15 @@ export default function RootLayout() {
     configureImmersiveMode();
   }, []);
 
+  // Initialize Notifications
+  useEffect(() => {
+    const setupNotifications = async () => {
+      // We'll handle registration in AuthContext or a separate hook after login
+      // But we can set up listeners here if needed
+    };
+    setupNotifications();
+  }, []);
+
   // If fonts aren't loaded and there's no error, return null to keep splash screen
   if (!fontsLoaded && !fontError) {
     return null;

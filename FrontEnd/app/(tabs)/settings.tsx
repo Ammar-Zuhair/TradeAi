@@ -55,10 +55,41 @@ export default function SettingsScreen() {
     );
   };
 
-  const togglePushNotifications = (value: boolean) => {
+  const togglePushNotifications = async (value: boolean) => {
     setPushNotifications(value);
-    // In a real app, we would call an API to update user preferences
-    // or register/unregister the device token
+    if (user?.token) {
+      try {
+        const { registerForPushNotificationsAsync, notificationService } = require('@/services/notificationService');
+        let token = null;
+        if (value) {
+          token = await registerForPushNotificationsAsync();
+        }
+        // If disabling, we might want to keep the token but set enabled=false, 
+        // or we might want to clear it. For now, let's just update the preference.
+        // If enabling, we need to make sure we have a token.
+
+        // Actually, if value is true, we need a token. If false, we can send null or keep existing token but set enabled=false.
+        // Let's try to get token if enabling.
+        if (value && !token) {
+          // If we failed to get token (e.g. permission denied), revert switch
+          // But registerForPushNotificationsAsync handles permissions.
+          // If it returns undefined, it failed.
+          token = await registerForPushNotificationsAsync();
+          if (!token) {
+            setPushNotifications(false);
+            Alert.alert("Error", "Failed to enable notifications. Please check permissions.");
+            return;
+          }
+        }
+
+        await notificationService.updatePushToken(user.token, token, value);
+
+      } catch (e) {
+        console.error(e);
+        Alert.alert("Error", "Failed to update settings");
+        setPushNotifications(!value);
+      }
+    }
   };
 
   // Dynamic styles

@@ -457,3 +457,24 @@ async def change_password(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to change password: {str(e)}"
         )
+
+
+@router.put("/update-push-token")
+async def update_push_token(
+    token: str = None,
+    enabled: bool = True,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update user's push notification token and preference"""
+    try:
+        current_user.PushToken = token
+        current_user.IsNotificationsEnabled = enabled
+        db.commit()
+        return {"message": "Push settings updated successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update push settings: {str(e)}"
+        )

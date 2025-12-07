@@ -21,6 +21,8 @@ type AccountsContextType = {
   getAccountTrades: (accountId: string) => TradeType[];
   getAccountHistory: (accountId: string) => TradeType[];
   allHistory: TradeType[];
+  activeAccountId: string | null;
+  setActiveAccount: (id: string | null) => void;
   clearError: () => void;
 };
 
@@ -34,6 +36,8 @@ const AccountsContext = createContext<AccountsContextType>({
   getAccountTrades: () => [],
   getAccountHistory: () => [],
   allHistory: [],
+  activeAccountId: null,
+  setActiveAccount: () => { },
   clearError: () => { },
 });
 
@@ -46,6 +50,7 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [history, setHistory] = useState<Record<string, TradeType[]>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeAccountId, setActiveAccount] = useState<string | null>(null);
 
   // Load accounts from API when user logs in
   useEffect(() => {
@@ -236,6 +241,8 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         getAccountTrades,
         getAccountHistory,
         allHistory,
+        activeAccountId,
+        setActiveAccount,
         clearError,
       }}
     >

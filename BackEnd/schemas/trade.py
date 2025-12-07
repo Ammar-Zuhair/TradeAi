@@ -15,13 +15,13 @@ class TradeBase(BaseModel):
     pass
 
 class TradeCreate(BaseModel):
+    TradeID: int # Ticket Number
     AccountID: int
     TradeType: str
     TradeAsset: str
     TradeLotsize: Decimal
     TradeOpenPrice: Decimal
     TradeOpenTime: datetime
-    TradeTicket: Optional[int] = None
 
 class TradeUpdate(BaseModel):
     TradeClosePrice: Optional[Decimal] = None
@@ -32,7 +32,7 @@ class TradeUpdate(BaseModel):
 class TradeResponse(BaseModel):
     TradeID: int
     AccountID: int
-    TradeTicket: Optional[int] = None
+    # TradeTicket removed
     TradeType: str
     TradeAsset: str
     TradeLotsize: Decimal

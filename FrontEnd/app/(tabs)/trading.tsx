@@ -17,13 +17,18 @@ import { HeadingText, BodyText } from '@/components/StyledText';
 import TradeCard, { TradeType } from '@/components/TradeCard';
 
 export default function TradingScreen() {
-  const { accounts, getAccountTrades } = useAccounts();
+  const { accounts, getAccountTrades, activeAccountId } = useAccounts();
   const { colors } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState('all');
 
-  // Get all trades from all accounts
+  // Get all trades from all accounts (or filtered by active account)
   const allTrades = accounts.reduce<TradeType[]>((acc, account) => {
+    // If activeAccountId is set, only include that account
+    if (activeFilter !== 'all' && activeAccountId && account.id !== activeAccountId) return acc;
+    // Wait, activeFilter is for buy/sell. I need to check activeAccountId from context.
+    if (activeAccountId && account.id !== activeAccountId) return acc;
+
     const accountTrades = getAccountTrades(account.id);
     return [...acc, ...accountTrades];
   }, []);
@@ -281,11 +286,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderRadius: Layout.borderRadius.md,
     marginBottom: Layout.spacing.md,
-    padding: 4,
+    padding: 2, // Reduced from 4
   },
   filterTab: {
     flex: 1,
-    paddingVertical: Layout.spacing.sm,
+    paddingVertical: 12, // Increased from Layout.spacing.sm (usually 8)
     alignItems: 'center',
     borderRadius: Layout.borderRadius.sm,
   },

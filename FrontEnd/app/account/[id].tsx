@@ -14,15 +14,18 @@ import { LineChart } from 'react-native-chart-kit';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { useAccounts } from '@/contexts/AccountsContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import Layout from '@/constants/Layout';
 import { HeadingText, BodyText } from '@/components/StyledText';
 import TradeCard from '@/components/TradeCard';
 import Button from '@/components/Button';
+import { tradeService as api } from '@/services/api';
 
 export default function AccountDetailsScreen() {
   const { id } = useLocalSearchParams();
-  const { accounts, getAccountTrades, removeAccount } = useAccounts();
+  const { user } = useAuth();
+  const { accounts, getAccountTrades, removeAccount, activeAccountId, setActiveAccount, refreshAccounts } = useAccounts();
   const { colors } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -256,6 +259,44 @@ export default function AccountDetailsScreen() {
             variant="danger"
             disabled={trades.length === 0}
             buttonStyle={styles.actionButton}
+            onPress={() => {
+              Alert.alert(
+                "Close All Trades",
+                "Are you sure you want to close all open trades for this account?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Close All",
+                    style: "destructive",
+                    onPress: async () => {
+                      if (!user?.token) return;
+                      try {
+                        setRefreshing(true);
+                        await api.closeAllTrades(user.token, parseInt(id as string));
+                        await refreshAccounts(); // Refresh to show closed trades
+                        Alert.alert("Success", "All trades have been closed.");
+                      } catch (e: any) {
+                        console.error(e);
+                        Alert.alert("Error", e.response?.data?.detail || "Failed to close trades");
+                      } finally {
+                        setRefreshing(false);
+                      }
+                    }
+                  }
+                ]
+              );
+            }}
+          />
+
+          <Button
+            title={accounts.find(a => a.id === id)?.id === activeAccountId ? "Main Account (Active)" : "Set as Main Account"}
+            variant={accounts.find(a => a.id === id)?.id === activeAccountId ? "primary" : "outline"}
+            disabled={accounts.find(a => a.id === id)?.id === activeAccountId}
+            buttonStyle={styles.actionButton}
+            onPress={() => {
+              setActiveAccount(id as string);
+              Alert.alert("Success", "This account is now set as the main account.");
+            }}
           />
 
           <Button

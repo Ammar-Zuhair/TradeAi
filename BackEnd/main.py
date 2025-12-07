@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from database import Base, engine
-from routers import auth, users, accounts, trades, transactions, ai_recommendations
+from routers import auth, users, accounts, trades, transactions, ai_recommendations, admin
 from ai_integration.scheduler import ai_scheduler
 from ai_integration.model_runner import run_ai_models
 from models.user import User
@@ -81,6 +81,7 @@ app.include_router(accounts.router)
 app.include_router(trades.router)
 app.include_router(transactions.router)
 app.include_router(ai_recommendations.router)
+app.include_router(admin.router)
 
 
 @app.get("/")
@@ -132,8 +133,8 @@ async def startup_event():
             with connection.begin():
                 connection.execute(text('ALTER TABLE "Accounts" ALTER COLUMN "AccountLoginPassword" TYPE VARCHAR(255);'))
                 connection.execute(text('ALTER TABLE "Accounts" ALTER COLUMN "AccountLoginServer" TYPE VARCHAR(100);'))
-                # Migration for TradeTicket
-                connection.execute(text('ALTER TABLE "Trades" ADD COLUMN IF NOT EXISTS "TradeTicket" INTEGER;'))
+                # Migration for TradeTicket - REMOVED as we now use TradeID as Ticket
+                # connection.execute(text('ALTER TABLE "Trades" ADD COLUMN IF NOT EXISTS "TradeTicket" INTEGER;'))
                 # Migration for TradeProfitLose (Integer -> Decimal)
                 connection.execute(text('ALTER TABLE "Trades" ALTER COLUMN "TradeProfitLose" TYPE DECIMAL(12, 2);'))
         print("Database: ✅ Applied schema migration for Accounts and Trades tables")

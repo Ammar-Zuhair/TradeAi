@@ -24,7 +24,7 @@ import AccountCard from '@/components/AccountCard';
 
 export default function DashboardScreen() {
   const { user } = useAuth();
-  const { accounts, isLoading } = useAccounts();
+  const { accounts, isLoading, activeAccountId } = useAccounts();
   const { colors } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
   const [totalBalance, setTotalBalance] = useState(0);
@@ -41,13 +41,16 @@ export default function DashboardScreen() {
     let profit = 0;
 
     accounts.forEach(account => {
+      // If activeAccountId is set, only include that account
+      if (activeAccountId && account.id !== activeAccountId) return;
+
       balance += account.balance;
       profit += account.profit;
     });
 
     setTotalBalance(balance);
     setTotalProfit(profit);
-  }, [accounts]);
+  }, [accounts, activeAccountId]);
 
   const onRefresh = async () => {
     setRefreshing(true);

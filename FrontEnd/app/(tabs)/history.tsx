@@ -24,7 +24,7 @@ const FILTER_OPTIONS = {
 };
 
 export default function HistoryScreen() {
-  const { allHistory, refreshAccounts } = useAccounts();
+  const { allHistory, refreshAccounts, activeAccountId, getAccountHistory } = useAccounts();
   const { colors } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
   const [timeFilter, setTimeFilter] = useState('This Month');
@@ -82,6 +82,38 @@ export default function HistoryScreen() {
   // Apply filters when selection changes or trades update
   React.useEffect(() => {
     let filtered = [...allHistory];
+
+    // Filter by Active Account
+    if (activeAccountId) {
+      // Note: TradeType in frontend might not have accountId property explicitly defined in the interface yet.
+      // We need to check if it's there or if we need to add it.
+      // Assuming we added it or will add it. If not, we might need to filter by checking if trade belongs to account.
+      // But allHistory is flattened.
+      // Let's check where allHistory comes from in AccountsContext.
+      // It comes from `Object.values(history).flat()`.
+      // We can filter `history[activeAccountId]` directly instead of flattening all if activeAccountId is set.
+      // But here we use `allHistory`.
+      // Let's change how we get `filtered` initial value.
+    }
+
+    // Better approach:
+    if (activeAccountId) {
+      // If active account is selected, only show its history
+      // We can't easily filter `allHistory` if it doesn't have accountId.
+      // But wait, `getAccountHistory` exists in context.
+      // So we should use that if activeAccountId is set.
+    }
+
+    // Actually, let's look at `AccountsContext` again.
+    // `allHistory` is `Object.values(history).flat()`.
+    // `history` is `Record<string, TradeType[]>`.
+    // So if we have `activeAccountId`, we can just grab `history[activeAccountId]`.
+
+    if (activeAccountId) {
+      filtered = getAccountHistory(activeAccountId);
+    } else {
+      filtered = [...allHistory];
+    }
 
     // Apply Time Filter
     const now = new Date();
@@ -399,11 +431,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
   },
   filterButton: {
-    height: 36,
+    height: 42, // Increased from 36
     borderRadius: Layout.borderRadius.md,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Layout.spacing.md,
+    justifyContent: 'center', // Center content
+    paddingHorizontal: Layout.spacing.sm, // Reduced padding to allow more text space
   },
   statsContainer: {
     flexDirection: 'row',
@@ -431,13 +464,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: Layout.spacing.lg,
+    gap: 8, // Add gap
   },
   filterItem: {
     position: 'relative',
+    flex: 1, // Allow items to expand
   },
   filterButtonText: {
-    fontSize: 14,
-    marginHorizontal: Layout.spacing.xs,
+    fontSize: 13, // Slightly smaller font to prevent wrapping
+    marginHorizontal: 4, // Reduced margin
+    textAlign: 'center',
   },
   filterDropdown: {
     position: 'absolute',
