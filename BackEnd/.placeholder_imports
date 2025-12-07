@@ -1,0 +1,3 @@
+import os
+
+# Add missing import in auth.py

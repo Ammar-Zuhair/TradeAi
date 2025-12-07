@@ -1,0 +1,63 @@
+
+services:
+  mt5-trading-system:
+    # Build configuration
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    # Image name
+    image: muneerbahwireth/mt5-trading-system:latest
+    
+    # Container name
+    container_name: mt5-trading-bot
+    
+    # Restart policy (always restart on failure)
+    restart: unless-stopped
+    
+    # Environment variables from .env file
+    env_file:
+      - .env
+    
+    # Additional environment variables (optional)
+    environment:
+      - TZ=Asia/Riyadh  # تعديل المنطقة الزمنية حسب موقعك
+      - PYTHONUNBUFFERED=1
+    
+    # Volumes for persistent data
+    volumes:
+      # Persist logs
+      - ./logs:/app/logs
+      # Persist trading data
+      - ./data:/app/data
+      # Persist models (if they update)
+      - ./models:/app/models
+      # Persist scalers
+      - ./scalers:/app/scalers
+      # Persist recommendations
+      - ./recommendations.csv:/app/recommendations.csv
+    
+    # Network mode (optional)
+    # network_mode: bridge
+    
+    # Resource limits (optional, adjust based on your needs)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2.0'
+    #       memory: 4G
+    #     reservations:
+    #       cpus: '1.0'
+    #       memory: 2G
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Optional: Create named volumes
+# volumes:
+#   mt5-logs:
+#   mt5-data:
