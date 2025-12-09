@@ -9,7 +9,7 @@ import { Platform } from 'react-native';
 // 1. Open Command Prompt (cmd)
 // 2. Type 'ipconfig'
 // 3. Look for "IPv4 Address" (e.g., 192.168.1.5)
-const SERVER_IP = '192.168.1.100';
+const SERVER_IP = '10.134.17.95';
 const SERVER_PORT = '3000';
 // ---------------------------------------------------------------------------
 

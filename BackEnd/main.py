@@ -137,7 +137,11 @@ async def startup_event():
                 # connection.execute(text('ALTER TABLE "Trades" ADD COLUMN IF NOT EXISTS "TradeTicket" INTEGER;'))
                 # Migration for TradeProfitLose (Integer -> Decimal)
                 connection.execute(text('ALTER TABLE "Trades" ALTER COLUMN "TradeProfitLose" TYPE DECIMAL(12, 2);'))
-        print("Database: ✅ Applied schema migration for Accounts and Trades tables")
+                
+                # Migration for Users (Push Notifications)
+                connection.execute(text('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "PushToken" VARCHAR(255);'))
+                connection.execute(text('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "IsNotificationsEnabled" BOOLEAN DEFAULT TRUE;'))
+        print("Database: ✅ Applied schema migration for Accounts, Trades, and Users tables")
     except Exception as e:
         # Ignore if it fails (likely already applied or table doesn't exist yet)
         print(f"Database: ℹ️ Schema migration skipped: {str(e)}")

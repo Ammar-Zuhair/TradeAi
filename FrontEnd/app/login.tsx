@@ -164,7 +164,7 @@ export default function LoginScreen() {
     >
       <View style={styles.header}>
         <Image
-          source={{ uri: 'https://images.pexels.com/photos/7567445/pexels-photo-7567445.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2' }}
+          source={ require('../assets/images/icon.jpg' )}
           style={styles.logo}
         />
         <HeadingText style={[styles.title, themeStyles.title]}>TradeAI</HeadingText>
