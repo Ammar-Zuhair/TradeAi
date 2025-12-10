@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 
+        Network Security Configuration for TradeAI App
+        
+        This configuration allows HTTP (cleartext) traffic for development purposes.
+        
+        ⚠️ WARNING: For production builds, you should:
+        1. Use HTTPS with a valid SSL certificate
+        2. Remove or restrict cleartextTrafficPermitted
+        3. Specify only trusted domains
+    -->
+    
+    <!-- Allow cleartext traffic for all domains (Development Only) -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <!-- Trust system certificates -->
+            <certificates src="system" />
+            <!-- Trust user-added certificates (for debugging with proxy tools) -->
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+    
+    <!-- 
+        For Production, use domain-specific configuration like this:
+        
+        <domain-config cleartextTrafficPermitted="false">
+            <domain includeSubdomains="true">yourdomain.com</domain>
+            <trust-anchors>
+                <certificates src="system" />
+            </trust-anchors>
+        </domain-config>
+        
+        <domain-config cleartextTrafficPermitted="true">
+            <domain includeSubdomains="true">192.168.1.0/24</domain>
+            <domain includeSubdomains="true">10.0.0.0/8</domain>
+            <domain includeSubdomains="true">172.16.0.0/12</domain>
+        </domain-config>
+    -->
+</network-security-config>
