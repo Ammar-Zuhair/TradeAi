@@ -30,7 +30,7 @@ warnings.filterwarnings('ignore')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # ==================== CONFIGURATION ====================
-SYMBOL = 'XAUUSD'
+SYMBOL = 'XAUUSDm'
 CSV_FILE = 'XAUUSD-15M.csv'
 MODEL_DIR = 'saved_model_single_train_Full'
 CHARTS_DIR = 'horizon_charts_single_train_Full'

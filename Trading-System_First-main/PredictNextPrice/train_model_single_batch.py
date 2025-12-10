@@ -10,7 +10,7 @@ import joblib
 # =========================
 # إعدادات
 # =========================
-PAIR = 'XAUUSD'
+PAIR = 'XAUUSDm'
 CSV_PATH = 'XAUUSD-15M.csv'
 DATE_COL = 'date'
 COLS_MAP = {'Open':'open','High':'high','Low':'low','Close':'close','Volume':'volume'}

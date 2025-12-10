@@ -9,10 +9,26 @@ import { Platform } from 'react-native';
 // 1. Open Command Prompt (cmd)
 // 2. Type 'ipconfig'
 // 3. Look for "IPv4 Address" (e.g., 192.168.1.5)
-const SERVER_IP = '10.134.17.95';
+// 
+// ⚠️ IMPORTANT: This IP may change when you restart your router!
+// For a permanent solution, set a Static IP in your router settings.
+const SERVER_IP = '172.184.114.68';
 const SERVER_PORT = '3000';
 // ---------------------------------------------------------------------------
 
+/**
+ * Get the appropriate API URL based on the platform and environment
+ * 
+ * Development (HTTP):
+ * - Android Emulator: http://10.0.2.2:3000/api
+ * - Physical Device: http://YOUR_COMPUTER_IP:3000/api
+ * - iOS Simulator: http://localhost:3000/api
+ * 
+ * Production (HTTPS):
+ * - All platforms: https://yourdomain.com/api
+ * 
+ * 📖 For detailed setup instructions, see: NETWORK_SETUP.md
+ */
 const getApiUrl = () => {
     // For Android Emulator, use special IP
     if (Platform.OS === 'android') {

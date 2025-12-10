@@ -30,8 +30,9 @@ def hash_password(password: str) -> str:
     # bcrypt has a limit of 72 bytes
     password_bytes = password.encode('utf-8')
     if len(password_bytes) > 72:
-        # Truncate to 72 bytes and decode back to string (ignoring errors if split mid-char)
-        password = password_bytes[:72].decode('utf-8', errors='ignore')
+        # Truncate to 72 bytes
+        # passlib handles bytes usually
+        return pwd_context.hash(password_bytes[:72])
     return pwd_context.hash(password)
 
 

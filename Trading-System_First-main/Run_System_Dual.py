@@ -320,6 +320,7 @@ class AccountMonitor:
                 try:
                     db: Session = SessionLocal()
                     # Find account ID based on login
+                    account = db.query(Account).filter(Account.AccountLoginNumber == self.credentials['login']).first()
                     if account:
                         new_trade = Trade(
                             TradeID=result.order, # Use Ticket as ID
@@ -349,6 +350,8 @@ class AccountMonitor:
                                 )
                         except Exception as e:
                             self.logger.error(f"⚠️ Failed to send notification: {e}")
+                    else:
+                        self.logger.error(f"❌ Account not found in DB for login: {self.credentials['login']}")
 
                     db.close()
                 except Exception as e:
@@ -625,6 +628,68 @@ class VotingStrategyMonitor(AccountMonitor):
             self.logger.error(f"❌ Price prediction failed: {e}")
             return None
 
+    def calculate_dynamic_sl_tp(self, action, current_price):
+        """
+        Calculate dynamic SL/TP based on last 10 candles
+        
+        Args:
+            action: 'BUY' or 'SELL'
+            current_price: Current entry price
+            
+        Returns:
+            tuple: (sl_price, tp_price) or (None, None) if calculation fails
+        """
+        try:
+            # Fetch last 10 candles (M15 timeframe)
+            rates = mt5.copy_rates_from_pos(SYMBOL, mt5.TIMEFRAME_M15, 0, 10)
+            
+            if rates is None or len(rates) < 10:
+                self.logger.warning("⚠️ Could not fetch enough candles for dynamic SL/TP, using fallback")
+                return None, None
+            
+            # Convert to DataFrame for easier analysis
+            df = pd.DataFrame(rates)
+            
+            # Buffer distance (configurable, default 5 points = 0.5 pips for gold)
+            BUFFER_POINTS = 5
+            symbol_info = mt5.symbol_info(SYMBOL)
+            point = symbol_info.point if symbol_info else 0.01
+            buffer = BUFFER_POINTS * point
+            
+            if action == 'BUY':
+                # For BUY: SL below lowest low of last 10 candles
+                lowest_low = df['low'].min()
+                sl = lowest_low - buffer
+                
+                # TP = 2x SL distance
+                sl_distance = current_price - sl
+                tp = current_price + (sl_distance * 2.0)
+                
+                self.logger.info(f"📊 Dynamic SL/TP (BUY):")
+                self.logger.info(f"   Lowest Low (10 candles): {lowest_low:.2f}")
+                self.logger.info(f"   SL: {sl:.2f} (buffer: {buffer:.2f})")
+                self.logger.info(f"   TP: {tp:.2f} (2x SL distance)")
+                
+            else:  # SELL
+                # For SELL: SL above highest high of last 10 candles
+                highest_high = df['high'].max()
+                sl = highest_high + buffer
+                
+                # TP = 2x SL distance
+                sl_distance = sl - current_price
+                tp = current_price - (sl_distance * 2.0)
+                
+                self.logger.info(f"📊 Dynamic SL/TP (SELL):")
+                self.logger.info(f"   Highest High (10 candles): {highest_high:.2f}")
+                self.logger.info(f"   SL: {sl:.2f} (buffer: {buffer:.2f})")
+                self.logger.info(f"   TP: {tp:.2f} (2x SL distance)")
+            
+            return sl, tp
+            
+        except Exception as e:
+            self.logger.error(f"❌ Dynamic SL/TP calculation failed: {e}")
+            return None, None
+
     def execute_voting_trade(self, action):
         if not ENABLE_AUTO_TRADING:
             self.logger.info(f"ℹ️ Recommendation: {action} (Auto-trading OFF)")
@@ -640,20 +705,29 @@ class VotingStrategyMonitor(AccountMonitor):
             current_bid, current_ask = tick.bid, tick.ask
             point = symbol_info.point
             
-            # Fixed SL/TP for Voting Strategy (Non-FVG)
-            FIXED_SL_PIPS = 30
-            FIXED_TP_PIPS = 60  # 1:2 Ratio
-            
+            # Determine entry price based on action
             if action == 'BUY':
                 price = current_ask
-                sl = price - (FIXED_SL_PIPS * 10 * point)
-                tp = price + (FIXED_TP_PIPS * 10 * point)
                 order_type = mt5.ORDER_TYPE_BUY
             else:
                 price = current_bid
-                sl = price + (FIXED_SL_PIPS * 10 * point)
-                tp = price - (FIXED_TP_PIPS * 10 * point)
                 order_type = mt5.ORDER_TYPE_SELL
+            
+            # Calculate dynamic SL/TP based on last 10 candles
+            sl, tp = self.calculate_dynamic_sl_tp(action, price)
+            
+            # Fallback to fixed SL/TP if dynamic calculation fails
+            if sl is None or tp is None:
+                self.logger.warning("⚠️ Using fallback fixed SL/TP (30/60 pips)")
+                FIXED_SL_PIPS = 30
+                FIXED_TP_PIPS = 60  # 1:2 Ratio
+                
+                if action == 'BUY':
+                    sl = price - (FIXED_SL_PIPS * 10 * point)
+                    tp = price + (FIXED_TP_PIPS * 10 * point)
+                else:
+                    sl = price + (FIXED_SL_PIPS * 10 * point)
+                    tp = price - (FIXED_TP_PIPS * 10 * point)
                 
             sl_distance_mt5_points = abs(sl - price) / point
             lot_size = self.calculate_lot_size(sl_distance_mt5_points)

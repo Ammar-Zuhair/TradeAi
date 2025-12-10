@@ -4,6 +4,7 @@ from database import Base, engine
 from routers import auth, users, accounts, trades, transactions, ai_recommendations, admin
 from ai_integration.scheduler import ai_scheduler
 from ai_integration.model_runner import run_ai_models
+from utils.trade_monitor import trade_monitor
 from models.user import User
 from models.account import Account
 from models.trade import Trade
@@ -101,7 +102,8 @@ async def health_check():
     return {
         "status": "healthy",
         "database": "connected",
-        "ai_scheduler": "running" if ai_scheduler.is_running else "stopped"
+        "ai_scheduler": "running" if ai_scheduler.is_running else "stopped",
+        "trade_monitor": "running"
     }
 
 
@@ -153,6 +155,22 @@ async def startup_event():
     # Start AI scheduler (runs every 15 minutes)
     ai_scheduler.start(run_ai_models, interval_minutes=15)
     print("AI Scheduler started - Running every 15 minutes")
+    
+    # Start trade monitor (runs every 30 seconds)
+    import asyncio
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.interval import IntervalTrigger
+    
+    trade_scheduler = AsyncIOScheduler()
+    trade_scheduler.add_job(
+        trade_monitor.check_and_update_closed_trades,
+        trigger=IntervalTrigger(seconds=30),
+        id='trade_monitor_job',
+        name='Trade Monitor Job',
+        replace_existing=True
+    )
+    trade_scheduler.start()
+    print("Trade Monitor started - Running every 30 seconds")
     print("=" * 50)
     print(f"API Documentation: http://localhost:{os.getenv('PORT', 3000)}/docs")
     print("=" * 50)

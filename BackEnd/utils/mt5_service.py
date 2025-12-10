@@ -130,3 +130,152 @@ class MT5Service:
             except:
                 pass
             return False, f"Connection test failed: {str(e)}"
+    
+    @staticmethod
+    async def get_account_info(login: int, password: str, server: str) -> Optional[Dict]:
+        """
+        Get current account information (balance, equity, etc.)
+        
+        Returns:
+            Dict with account info or None if failed
+        """
+        try:
+            if not mt5.initialize():
+                logger.error(f"MT5 initialization failed: {mt5.last_error()}")
+                return None
+            
+            if not mt5.login(login=login, password=password, server=server):
+                logger.error(f"MT5 login failed: {mt5.last_error()}")
+                mt5.shutdown()
+                return None
+            
+            account_info = mt5.account_info()
+            mt5.shutdown()
+            
+            if account_info is None:
+                return None
+            
+            return {
+                "balance": float(account_info.balance),
+                "equity": float(account_info.equity),
+                "profit": float(account_info.profit),
+                "margin": float(account_info.margin),
+                "margin_free": float(account_info.margin_free),
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting account info: {e}")
+            try:
+                mt5.shutdown()
+            except:
+                pass
+            return None
+    
+    @staticmethod
+    async def get_open_positions(login: int, password: str, server: str, symbol: str = None) -> Optional[list]:
+        """
+        Get all open positions for an account
+        
+        Args:
+            symbol: Optional symbol filter (e.g., 'XAUUSD')
+            
+        Returns:
+            List of position dicts or None if failed
+        """
+        try:
+            if not mt5.initialize():
+                logger.error(f"MT5 initialization failed: {mt5.last_error()}")
+                return None
+            
+            if not mt5.login(login=login, password=password, server=server):
+                logger.error(f"MT5 login failed: {mt5.last_error()}")
+                mt5.shutdown()
+                return None
+            
+            # Get positions
+            if symbol:
+                positions = mt5.positions_get(symbol=symbol)
+            else:
+                positions = mt5.positions_get()
+            
+            mt5.shutdown()
+            
+            if positions is None:
+                return []
+            
+            # Convert to list of dicts
+            result = []
+            for pos in positions:
+                result.append({
+                    'ticket': pos.ticket,
+                    'symbol': pos.symbol,
+                    'type': pos.type,  # 0=BUY, 1=SELL
+                    'volume': pos.volume,
+                    'price_open': pos.price_open,
+                    'price_current': pos.price_current,
+                    'profit': pos.profit,
+                    'sl': pos.sl,
+                    'tp': pos.tp,
+                })
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error getting positions: {e}")
+            try:
+                mt5.shutdown()
+            except:
+                pass
+            return None
+    
+    @staticmethod
+    async def get_trade_history(login: int, password: str, server: str, ticket: int) -> Optional[Dict]:
+        """
+        Get trade history details for a specific ticket
+        
+        Returns:
+            Dict with trade history or None if not found
+        """
+        try:
+            if not mt5.initialize():
+                logger.error(f"MT5 initialization failed: {mt5.last_error()}")
+                return None
+            
+            if not mt5.login(login=login, password=password, server=server):
+                logger.error(f"MT5 login failed: {mt5.last_error()}")
+                mt5.shutdown()
+                return None
+            
+            # Get deals for this ticket
+            from datetime import datetime, timedelta
+            # Look back 30 days for the trade
+            date_from = datetime.now() - timedelta(days=30)
+            date_to = datetime.now()
+            
+            deals = mt5.history_deals_get(date_from, date_to)
+            
+            mt5.shutdown()
+            
+            if deals is None or len(deals) == 0:
+                return None
+            
+            # Find the closing deal for this ticket
+            for deal in deals:
+                if deal.position_id == ticket and deal.entry == 1:  # 1 = OUT (closing deal)
+                    return {
+                        'ticket': deal.position_id,
+                        'close_price': deal.price,
+                        'close_time': datetime.fromtimestamp(deal.time),
+                        'profit': deal.profit,
+                        'volume': deal.volume,
+                    }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting trade history: {e}")
+            try:
+                mt5.shutdown()
+            except:
+                pass
+            return None
