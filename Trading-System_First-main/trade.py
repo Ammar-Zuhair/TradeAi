@@ -17,6 +17,8 @@ class Trade(Base):
     TradeCloseTime = Column(DateTime, nullable=True)
     TradeProfitLose = Column(DECIMAL(12, 2), nullable=True) # Changed to DECIMAL(12, 2) as per migration in main.py
     TradeStatus = Column(String(20), default='Open') # Winning/Losing/Open
+    TradeSL = Column(DECIMAL(10, 5), nullable=True) # Stop Loss
+    TradeTP = Column(DECIMAL(10, 5), nullable=True) # Take Profit
 
     # Relationship
     # Relationship

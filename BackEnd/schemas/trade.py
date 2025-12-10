@@ -42,6 +42,8 @@ class TradeResponse(BaseModel):
     TradeCloseTime: Optional[datetime] = None
     TradeStatus: str
     TradeProfitLose: Optional[Decimal] = None # Fixed name
+    TradeSL: Optional[Decimal] = None # Stop Loss
+    TradeTP: Optional[Decimal] = None # Take Profit
     
     class Config:
         from_attributes = True

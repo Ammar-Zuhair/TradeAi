@@ -11,7 +11,7 @@ import joblib
 # إعدادات
 # =========================
 PAIR = 'XAUUSDm'
-CSV_PATH = 'XAUUSD-15M.csv'
+CSV_PATH = r'D:\project\Trading-System_First-main\PredictNextPrice\XAUUSD-15M.csv'
 DATE_COL = 'date'
 COLS_MAP = {'Open':'open','High':'high','Low':'low','Close':'close','Volume':'volume'}
 SEED = 42

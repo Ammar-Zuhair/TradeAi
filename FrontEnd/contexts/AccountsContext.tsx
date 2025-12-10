@@ -10,6 +10,7 @@ type AccountsContextType = {
   isLoading: boolean;
   error: string | null;
   addAccount: (accountData: {
+    accountName: string;
     loginNumber: string;
     password: string;
     server: string;
@@ -80,7 +81,7 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // Transform API response to AccountType format
       const transformedAccounts: AccountType[] = response.map((acc: any) => ({
         id: acc.AccountID.toString(),
-        name: `Account ${acc.AccountLoginNumber}`,
+        name: acc.AccountName || `Account ${acc.AccountLoginNumber}`, // Use AccountName if available
         balance: parseFloat(acc.AccountBalance),
         currency: 'USD',
         profit: 0, // Will be updated below
@@ -105,12 +106,15 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             type: 'FOREX', // Default
             direction: t.TradeType,
             openPrice: parseFloat(t.TradeOpenPrice),
-            currentPrice: t.TradeClosePrice ? parseFloat(t.TradeClosePrice) : parseFloat(t.TradeOpenPrice), // Fallback
+            currentPrice: parseFloat(t.TradeClosePrice || t.TradeOpenPrice), // TradeClosePrice contains current price for open trades
             profit: t.TradeProfitLose ? parseFloat(t.TradeProfitLose) : 0.0,
             openTime: t.TradeOpenTime,
             closeTime: t.TradeCloseTime, // Add closeTime
             status: t.TradeStatus === 'Open' ? 'OPEN' : 'CLOSED',
-            ticket: t.TradeTicket
+            ticket: t.TradeID, // TradeID IS the ticket number
+            stopLoss: t.TradeSL ? parseFloat(t.TradeSL) : undefined,
+            takeProfit: t.TradeTP ? parseFloat(t.TradeTP) : undefined,
+            lotSize: t.TradeLotsize ? parseFloat(t.TradeLotsize) : undefined,
           }));
 
           // Filter only OPEN trades for the context state (history will fetch closed)
@@ -144,6 +148,7 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const addAccount = async (accountData: {
+    accountName: string;
     loginNumber: string;
     password: string;
     server: string;
@@ -161,6 +166,7 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const userId = parseInt(user.id); // Convert string id to number
       const response = await accountService.createAccount(user.token, {
         UserID: userId,
+        AccountName: accountData.accountName,
         AccountLoginNumber: parseInt(accountData.loginNumber),
         AccountLoginPassword: accountData.password,
         AccountLoginServer: accountData.server,

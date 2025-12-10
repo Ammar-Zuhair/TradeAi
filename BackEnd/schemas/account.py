@@ -8,6 +8,7 @@ TradingStrategyType = Literal["All", "FVG + Trend", "Voting"]
 
 
 class AccountBase(BaseModel):
+    AccountName: Optional[str] = None
     AccountType: Optional[str] = "Unknown"
     AccountLoginServer: Optional[str] = None
     AccountLoginNumber: Optional[int] = None
@@ -32,6 +33,7 @@ class AccountCreate(AccountBase):
 
 
 class AccountUpdate(BaseModel):
+    AccountName: Optional[str] = None
     AccountType: Optional[str] = None
     AccountLoginServer: Optional[str] = None
     AccountLoginNumber: Optional[int] = None

@@ -15,6 +15,7 @@ class Account(Base):
     __tablename__ = "Accounts"
 
     AccountID = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    AccountName = Column(String(100), nullable=True)  # User-friendly account name
     UserID = Column(Integer, ForeignKey("Users.UserID"), nullable=False)
     AccountType = Column(String(10), nullable=False) # Demo / Real
     AccountBalance = Column(DECIMAL(12, 2), default=0.00)

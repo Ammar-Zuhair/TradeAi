@@ -122,6 +122,104 @@ async def update_trade(
     return trade
 
 
+@router.post("/close/{ticket}", status_code=status.HTTP_200_OK)
+async def close_single_trade(
+    ticket: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Close a single trade by ticket number"""
+    import MetaTrader5 as mt5
+    from utils.encryption import decrypt
+    
+    # Find the trade
+    trade = db.query(Trade).filter(Trade.TradeID == ticket).first()
+    if not trade:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trade not found"
+        )
+    
+    # Get account credentials
+    account = db.query(Account).filter(Account.AccountID == trade.AccountID).first()
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found"
+        )
+    
+    try:
+        # Initialize MT5
+        if not mt5.initialize():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to initialize MT5"
+            )
+        
+        # Login to account
+        authorized = mt5.login(
+            login=account.AccountLoginNumber,
+            password=decrypt(account.AccountLoginPassword),
+            server=account.AccountLoginServer
+        )
+        
+        if not authorized:
+            mt5.shutdown()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to login to MT5 account"
+            )
+        
+        # Get position
+        positions = mt5.positions_get(ticket=ticket)
+        if not positions or len(positions) == 0:
+            mt5.shutdown()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Position not found in MT5"
+            )
+        
+        position = positions[0]
+        
+        # Prepare close request
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": position.symbol,
+            "volume": position.volume,
+            "type": mt5.ORDER_TYPE_SELL if position.type == 0 else mt5.ORDER_TYPE_BUY,
+            "position": ticket,
+            "price": mt5.symbol_info_tick(position.symbol).bid if position.type == 0 else mt5.symbol_info_tick(position.symbol).ask,
+            "deviation": 20,
+            "magic": 0,
+            "comment": "Closed from App",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        
+        # Send close order
+        result = mt5.order_send(request)
+        mt5.shutdown()
+        
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to close trade: {result.comment}"
+            )
+        
+        return {
+            "success": True,
+            "message": f"Trade {ticket} closed successfully",
+            "ticket": ticket
+        }
+        
+    except Exception as e:
+        mt5.shutdown()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 @router.post("/close-all/{account_id}", status_code=status.HTTP_200_OK)
 async def close_all_trades(
     account_id: int,

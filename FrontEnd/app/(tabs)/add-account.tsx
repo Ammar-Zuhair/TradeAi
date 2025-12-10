@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,7 +9,8 @@ import {
   TextInput,
   Alert,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -28,6 +29,7 @@ export default function AddAccountScreen() {
   const { colors } = useTheme();
 
   const [formData, setFormData] = useState({
+    accountName: '',
     loginNumber: '',
     password: '',
     server: '',
@@ -37,8 +39,37 @@ export default function AddAccountScreen() {
 
   const [isLoading, setIsLoading] = useState(false);
 
+  // Handle back button press
+  useEffect(() => {
+    const backAction = () => {
+      Alert.alert(
+        'Exit App',
+        'Are you sure you want to exit?',
+        [
+          {
+            text: 'Cancel',
+            onPress: () => null,
+            style: 'cancel'
+          },
+          {
+            text: 'Exit',
+            onPress: () => BackHandler.exitApp()
+          }
+        ]
+      );
+      return true;
+    };
+
+    const backHandler = BackHandler.addEventListener(
+      'hardwareBackPress',
+      backAction
+    );
+
+    return () => backHandler.remove();
+  }, []);
+
   const handleAddAccount = async () => {
-    if (!formData.loginNumber || !formData.password || !formData.server) {
+    if (!formData.accountName || !formData.loginNumber || !formData.password || !formData.server) {
       Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
@@ -52,6 +83,7 @@ export default function AddAccountScreen() {
     setIsLoading(true);
     try {
       const result = await addAccount({
+        accountName: formData.accountName,
         loginNumber: formData.loginNumber,
         password: formData.password,
         server: formData.server,
@@ -117,6 +149,21 @@ export default function AddAccountScreen() {
           </View>
 
           <View style={styles.form}>
+            {/* Account Name */}
+            <View style={styles.inputGroup}>
+              <BodyText style={[styles.label, themeStyles.label]}>Account Name *</BodyText>
+              <View style={[styles.inputContainer, themeStyles.inputContainer]}>
+                <User size={20} color={themeStyles.icon} style={styles.inputIcon} />
+                <TextInput
+                  style={[styles.input, themeStyles.input]}
+                  value={formData.accountName}
+                  onChangeText={(text) => setFormData({ ...formData, accountName: text })}
+                  placeholder="e.g., My Trading Account"
+                  placeholderTextColor={themeStyles.placeholder}
+                />
+              </View>
+            </View>
+
             {/* Login Number */}
             <View style={styles.inputGroup}>
               <BodyText style={[styles.label, themeStyles.label]}>Login Number *</BodyText>

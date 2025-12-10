@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  BackHandler,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Calendar, Filter, ChevronDown } from 'lucide-react-native';
@@ -34,6 +36,35 @@ export default function HistoryScreen() {
   const [showTimeFilter, setShowTimeFilter] = useState(false);
   const [showResultFilter, setShowResultFilter] = useState(false);
   const [showTypeFilter, setShowTypeFilter] = useState(false);
+
+  // Handle back button press
+  useEffect(() => {
+    const backAction = () => {
+      Alert.alert(
+        'Exit App',
+        'Are you sure you want to exit?',
+        [
+          {
+            text: 'Cancel',
+            onPress: () => null,
+            style: 'cancel'
+          },
+          {
+            text: 'Exit',
+            onPress: () => BackHandler.exitApp()
+          }
+        ]
+      );
+      return true;
+    };
+
+    const backHandler = BackHandler.addEventListener(
+      'hardwareBackPress',
+      backAction
+    );
+
+    return () => backHandler.remove();
+  }, []);
 
   // Get real history trades
   const [filteredTrades, setFilteredTrades] = useState<TradeType[]>([]);

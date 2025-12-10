@@ -8,6 +8,8 @@ import {
   TouchableOpacity,
   Dimensions,
   TextInput,
+  BackHandler,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -51,6 +53,35 @@ export default function DashboardScreen() {
     setTotalBalance(balance);
     setTotalProfit(profit);
   }, [accounts, activeAccountId]);
+
+  // Handle back button press
+  useEffect(() => {
+    const backAction = () => {
+      Alert.alert(
+        'Exit App',
+        'Are you sure you want to exit?',
+        [
+          {
+            text: 'Cancel',
+            onPress: () => null,
+            style: 'cancel'
+          },
+          {
+            text: 'Exit',
+            onPress: () => BackHandler.exitApp()
+          }
+        ]
+      );
+      return true; // Prevent default back behavior
+    };
+
+    const backHandler = BackHandler.addEventListener(
+      'hardwareBackPress',
+      backAction
+    );
+
+    return () => backHandler.remove();
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);

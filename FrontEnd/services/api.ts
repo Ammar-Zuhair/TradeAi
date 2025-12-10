@@ -170,6 +170,7 @@ export const accountService = {
 
     createAccount: async (token: string, data: {
         UserID: number;
+        AccountName?: string;
         AccountLoginNumber: number;
         AccountLoginPassword: string;
         AccountLoginServer: string;
@@ -216,6 +217,15 @@ export const tradeService = {
 
     getTrade: async (token: string, tradeId: number) => {
         const response = await api.get(`/trades/${tradeId}`, {
+            headers: {
+                Authorization: `Bearer ${token}`
+            }
+        });
+        return response.data;
+    },
+
+    closeTrade: async (token: string, ticket: number) => {
+        const response = await api.post(`/trades/close/${ticket}`, {}, {
             headers: {
                 Authorization: `Bearer ${token}`
             }

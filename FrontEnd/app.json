@@ -30,7 +30,7 @@
       "backgroundColor": "#ffffff"
     },
     "android": {
-      "package": "com.anonymous.boltexponativewind",
+      "package": "com.tradeai.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.jpg",
         "backgroundColor": "#ffffff"

@@ -204,6 +204,59 @@ class AccountMonitor:
         zone_id = str(zone.get('fvg_time', zone.get('timestamp')))
         return zone_id in self.used_zones
     
+    def sync_balance_from_mt5(self):
+        """Fetch current balance from MT5 and update database"""
+        try:
+            account_info = mt5.account_info()
+            if not account_info:
+                self.logger.error("❌ Failed to get MT5 account info for balance sync")
+                return False
+            
+            mt5_balance = account_info.balance
+            
+            # Update database
+            db: Session = SessionLocal()
+            account = db.query(Account).filter(Account.AccountLoginNumber == self.credentials['login']).first()
+            if account:
+                from decimal import Decimal
+                old_balance = account.AccountBalance
+                account.AccountBalance = Decimal(str(mt5_balance))
+                db.commit()
+                self.logger.info(f"💰 Balance Synced: ${old_balance} → ${mt5_balance}")
+                db.close()
+                return True
+            else:
+                self.logger.error(f"❌ Account not found in DB for login: {self.credentials['login']}")
+                db.close()
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"❌ Balance sync failed: {e}")
+            return False
+    
+    def has_active_trade(self):
+        """Check if this strategy has an active trade"""
+        try:
+            # Get positions for this symbol with our magic number or comment
+            positions = mt5.positions_get(symbol=SYMBOL)
+            
+            if not positions:
+                return False
+            
+            # Check if any position matches our strategy
+            strategy_comment = f"{self.strategy_type.upper()}_FVG" if self.strategy_type != 'voting' else "VOTING_ONLY"
+            
+            for pos in positions:
+                if pos.comment == strategy_comment:
+                    self.logger.info(f"⏳ Active trade exists (Ticket: {pos.ticket}), waiting for closure...")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error checking active trades: {e}")
+            return False
+    
     def calculate_lot_size(self, sl_distance_points):
         try:
             account_info = mt5.account_info()
@@ -331,7 +384,9 @@ class AccountMonitor:
                             TradeLotsize=lot_size,
                             TradeOpenPrice=result.price,
                             TradeOpenTime=datetime.now(),
-                            TradeStatus='Open'
+                            TradeStatus='Open',
+                            TradeSL=sl,
+                            TradeTP=tp
                         )
                         db.add(new_trade)
                         db.commit()
@@ -342,11 +397,13 @@ class AccountMonitor:
                             user = db.query(User).filter(User.UserID == account.UserID).first()
                             if user and user.IsNotificationsEnabled and user.PushToken:
                                 from utils.notifications import send_push_notification
+                                account_name = account.AccountName or f"Account {account.AccountLoginNumber}"
+                                action_ar = "شراء" if action == "BUY" else "بيع"
                                 send_push_notification(
                                     token=user.PushToken,
-                                    title="New Auto Trade 🤖",
-                                    body=f"{action} {SYMBOL} @ {result.price}",
-                                    data={"trade_id": new_trade.TradeID}
+                                    title=f"صفقة {action_ar} جديدة 🚀",
+                                    body=f"{action} {SYMBOL} @ {result.price}\nالحساب: {account_name}",
+                                    data={"trade_id": new_trade.TradeID, "account_name": account_name}
                                 )
                         except Exception as e:
                             self.logger.error(f"⚠️ Failed to send notification: {e}")
@@ -464,12 +521,17 @@ class AdvancedStrategyMonitor(AccountMonitor):
         self.logger.info("🚀 ADVANCED STRATEGY STARTED")
         self.logger.info("="*60)
         
-        # Initial Account Check
+        # Initial Account Check and Balance Sync
         self.mt5_context.execute(self.credentials, self._print_account_info)
+        self.mt5_context.execute(self.credentials, self.sync_balance_from_mt5)
         
         def logic_step():
             # This function runs inside the strict MT5 context
             try:
+                # 0. Check for active trades first
+                if self.has_active_trade():
+                    return  # Skip analysis if trade is active
+                
                 # 1. Get Price
                 bid, ask = self.get_current_price()
                 if not bid or not ask:
@@ -528,11 +590,16 @@ class SimpleStrategyMonitor(AccountMonitor):
         self.logger.info("🚀 SIMPLE STRATEGY STARTED")
         self.logger.info("="*60)
         
-        # Initial Account Check
+        # Initial Account Check and Balance Sync
         self.mt5_context.execute(self.credentials, self._print_account_info)
+        self.mt5_context.execute(self.credentials, self.sync_balance_from_mt5)
         
         def logic_step():
             try:
+                # 0. Check for active trades first
+                if self.has_active_trade():
+                    return  # Skip analysis if trade is active
+                
                 bid, ask = self.get_current_price()
                 if not bid or not ask:
                     return
@@ -771,7 +838,9 @@ class VotingStrategyMonitor(AccountMonitor):
                             TradeLotsize=lot_size,
                             TradeOpenPrice=result.price,
                             TradeOpenTime=datetime.now(),
-                            TradeStatus='Open'
+                            TradeStatus='Open',
+                            TradeSL=sl,
+                            TradeTP=tp
                         )
                         db.add(new_trade)
                         db.commit()
@@ -800,16 +869,15 @@ class VotingStrategyMonitor(AccountMonitor):
         self.logger.info("🚀 VOTING STRATEGY STARTED")
         self.logger.info("="*60)
         
-        # Initial Account Check
+        # Initial Account Check and Balance Sync
         self.mt5_context.execute(self.credentials, self._print_account_info)
+        self.mt5_context.execute(self.credentials, self.sync_balance_from_mt5)
         
         def logic_step():
             try:
-                # Check for open positions first
-                positions = mt5.positions_get(symbol=SYMBOL)
-                if positions and len(positions) > 0:
-                    # Skip if already in trade
-                    return
+                # Check for active trades first
+                if self.has_active_trade():
+                    return  # Skip if already in trade
                 
                 # Get full voting recommendation
                 voting_result = self.get_full_voting_recommendation()
@@ -1022,6 +1090,150 @@ class DataUpdater:
             self.logger.error(traceback.format_exc())
 
 
+# ==================== TRAILING STOP MANAGER ====================
+class TrailingStopManager:
+    """Manages trailing stop-loss at 1:1 ratio for all strategies"""
+    def __init__(self, mt5_context, shared_state):
+        self.mt5_context = mt5_context
+        self.shared_state = shared_state
+        self.logger = logging.getLogger('TrailingStop')
+        self.logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter('[TRAILING] %(asctime)s - %(message)s'))
+        self.logger.addHandler(handler)
+        
+        # Track which positions have been moved to breakeven
+        self.breakeven_positions = set()
+        
+    def check_and_modify_sl(self):
+        """Check all open positions and modify SL to breakeven at 1:1 ratio"""
+        try:
+            db: Session = SessionLocal()
+            open_trades = db.query(Trade).filter(Trade.TradeStatus == 'Open').all()
+            
+            if not open_trades:
+                db.close()
+                return
+            
+            # Group by account
+            trades_by_account = {}
+            for trade in open_trades:
+                if trade.AccountID not in trades_by_account:
+                    trades_by_account[trade.AccountID] = []
+                trades_by_account[trade.AccountID].append(trade)
+            
+            for account_id, trades in trades_by_account.items():
+                account = db.query(Account).filter(Account.AccountID == account_id).first()
+                if not account:
+                    continue
+                    
+                creds = {
+                    "login": account.AccountLoginNumber,
+                    "password": decrypt(account.AccountLoginPassword),
+                    "server": account.AccountLoginServer
+                }
+                
+                # Execute check in MT5 context
+                self.mt5_context.execute(creds, self._modify_sl_for_account, trades)
+                
+            db.close()
+            
+        except Exception as e:
+            self.logger.error(f"❌ Trailing stop check failed: {e}")
+    
+    def _modify_sl_for_account(self, trades):
+        """Modify SL for trades in a specific account (inside MT5 context)"""
+        for trade in trades:
+            try:
+                ticket = trade.TradeID
+                
+                # Skip if already moved to breakeven
+                if ticket in self.breakeven_positions:
+                    continue
+                
+                # Get current position
+                positions = mt5.positions_get(ticket=ticket)
+                
+                if not positions or len(positions) == 0:
+                    continue
+                
+                pos = positions[0]
+                entry_price = trade.TradeOpenPrice
+                current_sl = pos.sl
+                current_price = pos.price_current
+                trade_type = pos.type  # 0 = BUY, 1 = SELL
+                
+                # Calculate original SL distance
+                sl_distance = abs(float(entry_price) - current_sl)
+                
+                if sl_distance <= 0:
+                    continue
+                
+                # Determine strategy type from comment
+                strategy_comment = pos.comment
+                
+                # For Voting strategy, use 2:1 ratio (since TP is 2x SL)
+                # For other strategies, use 1:1 ratio
+                if strategy_comment == "VOTING_ONLY":
+                    required_ratio = 1.0  # Move to breakeven at 2:1
+                else:
+                    required_ratio = 1.0  # Move to breakeven at 1:1
+                
+                # Check if price has moved favorably by the required ratio
+                should_modify = False
+                
+                if trade_type == 0:  # BUY
+                    # Price should be above entry by (sl_distance * ratio)
+                    required_price = float(entry_price) + (sl_distance * required_ratio)
+                    if current_price >= required_price:
+                        should_modify = True
+                else:  # SELL
+                    # Price should be below entry by (sl_distance * ratio)
+                    required_price = float(entry_price) - (sl_distance * required_ratio)
+                    if current_price <= required_price:
+                        should_modify = True
+                
+                if should_modify:
+                    # Modify SL to entry price (breakeven)
+                    symbol_info = mt5.symbol_info(pos.symbol)
+                    if not symbol_info:
+                        continue
+                    
+                    # Round entry price to symbol's digits
+                    new_sl = round(float(entry_price), symbol_info.digits)
+                    
+                    request = {
+                        "action": mt5.TRADE_ACTION_SLTP,
+                        "symbol": pos.symbol,
+                        "position": ticket,
+                        "sl": new_sl,
+                        "tp": pos.tp,
+                    }
+                    
+                    result = mt5.order_send(request)
+                    
+                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                        self.breakeven_positions.add(ticket)
+                        ratio_text = "2:1" if strategy_comment == "VOTING_ONLY" else "1:1"
+                        self.logger.info(f"✅ SL moved to BREAKEVEN at {ratio_text} | Ticket: {ticket} | Entry: {entry_price} | New SL: {new_sl}")
+                    else:
+                        self.logger.error(f"❌ Failed to modify SL for {ticket}: {result.retcode if result else 'No result'}")
+                        
+            except Exception as e:
+                self.logger.error(f"❌ Error modifying SL for trade {trade.TradeID}: {e}")
+    
+    def run(self):
+        self.logger.info("\n" + "="*60)
+        self.logger.info("🛡️ TRAILING STOP MANAGER STARTED")
+        self.logger.info("   1:1 Ratio for FVG Strategies")
+        self.logger.info("   2:1 Ratio for Voting Strategy")
+        self.logger.info("="*60)
+        
+        while not self.shared_state.should_stop.is_set():
+            self.check_and_modify_sl()
+            time.sleep(2)  # Check every 2 seconds
+
+
 # ==================== TRADE MONITOR ====================
 class TradeMonitor:
     def __init__(self, mt5_context):
@@ -1082,6 +1294,8 @@ class TradeMonitor:
                     # Trade is still OPEN
                     pos = positions[0]
                     trade.TradeProfitLose = pos.profit
+                    # Save current price for UI display (use TradeClosePrice temporarily for open trades)
+                    trade.TradeClosePrice = pos.price_current
                 else:
                     # Trade is NOT in positions -> CLOSED
                     # Check history to confirm and get final profit
@@ -1099,14 +1313,36 @@ class TradeMonitor:
                         trade.TradeClosePrice = last_deal.price
                         trade.TradeCloseTime = datetime.fromtimestamp(last_deal.time)
                         
-                        # UPDATE ACCOUNT BALANCE
+                        # SYNC BALANCE FROM MT5 (instead of manual calculation)
                         account = db.query(Account).filter(Account.AccountID == trade.AccountID).first()
                         if account:
-                            # Ensure we are working with Decimal/Float correctly
-                            # AccountBalance is DECIMAL, total_profit is float from MT5
-                            from decimal import Decimal
-                            account.AccountBalance = account.AccountBalance + Decimal(str(total_profit))
-                            self.logger.info(f"💰 Balance Updated: {account.AccountBalance} (Profit: {total_profit})")
+                            # Update balance from MT5
+                            account_info = mt5.account_info()
+                            if account_info:
+                                from decimal import Decimal
+                                old_balance = account.AccountBalance
+                                account.AccountBalance = Decimal(str(account_info.balance))
+                                self.logger.info(f"💰 Balance Synced from MT5: ${old_balance} → ${account_info.balance} (Trade Profit: {total_profit})")
+                                # Send Notification for closed trade
+                                try:
+                                    user = db.query(User).filter(User.UserID == account.UserID).first()
+                                    if user and user.IsNotificationsEnabled and user.PushToken:
+                                        from utils.notifications import send_push_notification
+                                        account_name = account.AccountName or f"Account {account.AccountLoginNumber}"
+                                        profit_emoji = "📈" if trade.TradeProfitLose >= 0 else "📉"
+                                        profit_text = f"+${trade.TradeProfitLose:.2f}" if trade.TradeProfitLose >= 0 else f"-${abs(trade.TradeProfitLose):.2f}"
+                                        action_ar = "شراء" if trade.TradeType == "BUY" else "بيع"
+                                        result_ar = "ربح" if trade.TradeProfitLose >= 0 else "خسارة"
+                                        send_push_notification(
+                                            token=user.PushToken,
+                                            title=f"إغلاق صفقة {action_ar} {profit_emoji}",
+                                            body=f"{trade.TradeType} {trade.TradeAsset}\n{result_ar}: {profit_text}\nالحساب: {account_name}",
+                                            data={"trade_id": trade.TradeID, "profit": str(trade.TradeProfitLose), "account_name": account_name}
+                                        )
+                                except Exception as e:
+                                    self.logger.error(f"⚠️ Failed to send close notification: {e}")
+                            else:
+                                self.logger.error("❌ Failed to get MT5 account info for balance sync")
                         
                         self.logger.info(f"✅ Trade {ticket} CLOSED. Profit: {total_profit}")
                     else:
@@ -1174,6 +1410,16 @@ def main():
             db.close()
             return
 
+        # 2. Start Trailing Stop Manager
+        try:
+            trailing_manager = TrailingStopManager(mt5_context, shared_state)
+            t_trailing = threading.Thread(target=trailing_manager.run, daemon=True)
+            t_trailing.start()
+            threads.append(t_trailing)
+            print("✅ Trailing Stop Manager started")
+        except Exception as e:
+            print(f"❌ Failed to start Trailing Stop Manager: {e}")
+
         # 3. Start Trade Monitor
         try:
             trade_monitor = TradeMonitor(mt5_context)
@@ -1184,7 +1430,7 @@ def main():
         except Exception as e:
             print(f"❌ Failed to start Trade Monitor: {e}")
 
-        # 2. Start Strategy Monitors based on Account Type
+        # 4. Start Strategy Monitors based on Account Type
         for acc in accounts:
             try:
                 creds = {

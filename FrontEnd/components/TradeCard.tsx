@@ -17,18 +17,29 @@ export type TradeType = {
   closeTime?: string;
   status: 'OPEN' | 'CLOSED';
   ticket?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  lotSize?: number;
+  accountName?: string; // Account name for display
 };
 
 type TradeCardProps = {
   trade: TradeType;
   onPress?: (id: string) => void;
+  showAccountName?: boolean; // Show account name when viewing all accounts
 };
 
-export default function TradeCard({ trade, onPress }: TradeCardProps) {
+export default function TradeCard({ trade, onPress, showAccountName = false }: TradeCardProps) {
   const { colors } = useTheme();
+  const [isExpanded, setIsExpanded] = React.useState(false);
   const isProfit = trade.profit > 0;
   const profitColor = isProfit ? colors.positive : colors.negative;
   const profitPercentage = ((trade.currentPrice - trade.openPrice) / trade.openPrice) * 100 * (trade.direction === 'BUY' ? 1 : -1);
+
+  const handlePress = () => {
+    setIsExpanded(!isExpanded);
+    onPress && onPress(trade.id);
+  };
 
   // Dynamic styles
   const themeStyles = {
@@ -36,59 +47,114 @@ export default function TradeCard({ trade, onPress }: TradeCardProps) {
     symbol: { color: colors.text },
     detailLabel: { color: colors.placeholder },
     detailValue: { color: colors.text },
+    expandedSection: { backgroundColor: colors.surface },
+    accountNameBadge: { backgroundColor: colors.surface },
+    accountNameText: { color: colors.primary },
   };
 
   return (
-    <TouchableOpacity
-      style={[styles.container, themeStyles.container]}
-      onPress={() => onPress && onPress(trade.id)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.symbolContainer}>
-        <SubheadingText style={[styles.symbol, themeStyles.symbol]}>{trade.symbol}</SubheadingText>
-        <View style={[styles.directionBadge, {
-          backgroundColor: trade.direction === 'BUY' ? colors.positive : colors.negative
-        }]}>
-          {trade.direction === 'BUY' ?
-            <ArrowUp size={14} color="#fff" /> :
-            <ArrowDown size={14} color="#fff" />
-          }
-          <BodyText style={styles.directionText}>{trade.direction}</BodyText>
+    <View>
+      {/* Account Name Badge - shown when viewing all accounts */}
+      {showAccountName && trade.accountName && (
+        <View style={[styles.accountNameBadge, themeStyles.accountNameBadge]}>
+          <BodyText style={[styles.accountNameText, themeStyles.accountNameText]}>
+            📊 {trade.accountName}
+          </BodyText>
         </View>
-      </View>
+      )}
 
-      <View style={styles.detailsContainer}>
-        <View style={styles.detailRow}>
-          <BodyText style={[styles.detailLabel, themeStyles.detailLabel]}>Entry</BodyText>
-          <BodyText style={[styles.detailValue, themeStyles.detailValue]}>${trade.openPrice.toFixed(2)}</BodyText>
-        </View>
-        <View style={styles.detailRow}>
-          <BodyText style={[styles.detailLabel, themeStyles.detailLabel]}>Current</BodyText>
-          <BodyText style={[styles.detailValue, themeStyles.detailValue]}>${trade.currentPrice.toFixed(2)}</BodyText>
-        </View>
-        <View style={styles.detailRow}>
-          <BodyText style={[styles.detailLabel, themeStyles.detailLabel]}>Ticket</BodyText>
-          <BodyText style={[styles.detailValue, themeStyles.detailValue]}>{trade.ticket || '-'}</BodyText>
-        </View>
-      </View>
+      <TouchableOpacity
+        style={[styles.container, themeStyles.container]}
+        onPress={handlePress}
+        activeOpacity={0.7}
+      >
+        <View style={styles.mainContent}>
+          <View style={styles.symbolContainer}>
+            <SubheadingText style={[styles.symbol, themeStyles.symbol]}>{trade.symbol}</SubheadingText>
+            <View style={[styles.directionBadge, {
+              backgroundColor: trade.direction === 'BUY' ? colors.positive : colors.negative
+            }]}>
+              {trade.direction === 'BUY' ?
+                <ArrowUp size={14} color="#fff" /> :
+                <ArrowDown size={14} color="#fff" />
+              }
+              <BodyText style={styles.directionText}>{trade.direction}</BodyText>
+            </View>
+          </View>
 
-      <View style={styles.profitContainer}>
-        <SubheadingText style={[styles.profitValue, { color: profitColor }]}>
-          ${Math.abs(trade.profit).toFixed(2)}
-        </SubheadingText>
-        <BodyText style={[styles.profitPercentage, { color: profitColor }]}>
-          {isProfit ? '+' : '-'}{Math.abs(profitPercentage).toFixed(2)}%
-        </BodyText>
-      </View>
-    </TouchableOpacity>
+          <View style={styles.detailsContainer}>
+            <View style={styles.detailRow}>
+              <BodyText style={[styles.detailLabel, themeStyles.detailLabel]}>Entry</BodyText>
+              <BodyText style={[styles.detailValue, themeStyles.detailValue]}>${trade.openPrice.toFixed(2)}</BodyText>
+            </View>
+            <View style={styles.detailRow}>
+              <BodyText style={[styles.detailLabel, themeStyles.detailLabel]}>Current</BodyText>
+              <BodyText style={[styles.detailValue, themeStyles.detailValue]}>${trade.currentPrice.toFixed(2)}</BodyText>
+            </View>
+            <View style={styles.detailRow}>
+              <BodyText style={[styles.detailLabel, themeStyles.detailLabel]}>Ticket</BodyText>
+              <BodyText style={[styles.detailValue, themeStyles.detailValue]}>{trade.ticket || '-'}</BodyText>
+            </View>
+          </View>
+
+          <View style={styles.profitContainer}>
+            <SubheadingText style={[styles.profitValue, { color: profitColor }]}>
+              ${Math.abs(trade.profit).toFixed(2)}
+            </SubheadingText>
+            <BodyText style={[styles.profitPercentage, { color: profitColor }]}>
+              {isProfit ? '+' : '-'}{Math.abs(profitPercentage).toFixed(2)}%
+            </BodyText>
+          </View>
+        </View>
+
+        {/* Expandable Section */}
+        {isExpanded && (
+          <View style={[styles.expandedSection, themeStyles.expandedSection]}>
+            <View style={styles.expandedRow}>
+              <BodyText style={[styles.expandedLabel, themeStyles.detailLabel]}>Stop Loss</BodyText>
+              <BodyText style={[styles.expandedValue, themeStyles.detailValue]}>
+                ${trade.stopLoss?.toFixed(2) || '-'}
+              </BodyText>
+            </View>
+            <View style={styles.expandedRow}>
+              <BodyText style={[styles.expandedLabel, themeStyles.detailLabel]}>Take Profit</BodyText>
+              <BodyText style={[styles.expandedValue, themeStyles.detailValue]}>
+                ${trade.takeProfit?.toFixed(2) || '-'}
+              </BodyText>
+            </View>
+            <View style={styles.expandedRow}>
+              <BodyText style={[styles.expandedLabel, themeStyles.detailLabel]}>Lot Size</BodyText>
+              <BodyText style={[styles.expandedValue, themeStyles.detailValue]}>
+                {trade.lotSize?.toFixed(2) || '-'}
+              </BodyText>
+            </View>
+          </View>
+        )}
+      </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  accountNameBadge: {
+    paddingHorizontal: Layout.spacing.sm,
+    paddingVertical: Layout.spacing.xs,
+    borderTopLeftRadius: Layout.borderRadius.md,
+    borderTopRightRadius: Layout.borderRadius.md,
+    marginBottom: -Layout.borderRadius.md,
+    marginHorizontal: 0,
+  },
+  accountNameText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
   container: {
     borderRadius: Layout.borderRadius.lg,
     padding: Layout.spacing.md,
     marginBottom: Layout.spacing.md,
+    overflow: 'hidden',
+  },
+  mainContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -139,5 +205,24 @@ const styles = StyleSheet.create({
   },
   profitPercentage: {
     fontSize: 14,
+  },
+  expandedSection: {
+    marginTop: Layout.spacing.md,
+    paddingTop: Layout.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  expandedRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: Layout.spacing.sm,
+  },
+  expandedLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  expandedValue: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
