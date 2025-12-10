@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, DECIMAL, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from BackEnd.database import Base
+from database import Base
 from datetime import datetime
 from enum import Enum as PyEnum
 
@@ -27,3 +27,4 @@ class Account(Base):
 
     # Relationship
     owner = relationship("User", backref="accounts")
+

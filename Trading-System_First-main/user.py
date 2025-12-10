@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, BigInteger
 from sqlalchemy.sql import func
-from BackEnd.database import Base
-from BackEnd.utils.security import hash_password, verify_password
+from database import Base
+from utils.security import hash_password, verify_password
 from datetime import datetime
 
 class User(Base):
@@ -16,6 +16,8 @@ class User(Base):
     DateOfBirth = Column(Date, nullable=True)
     Address = Column(String(50), nullable=True)
     PhoneNumber = Column(String(15), nullable=True)
+    PushToken = Column(String(255), nullable=True)
+    IsNotificationsEnabled = Column(Boolean, default=True)
     
     # Timestamps (kept for internal tracking, though not explicitly requested, they are good practice)
     createdAt = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now())
