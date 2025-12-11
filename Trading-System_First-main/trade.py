@@ -8,8 +8,9 @@ class Trade(Base):
     TradeID = Column(Integer, primary_key=True, index=True, autoincrement=False) # TradeID IS the Ticket Number
     AccountID = Column(Integer, ForeignKey("Accounts.AccountID"), nullable=False)
     # TradeTicket removed, using TradeID instead
-    TradeType = Column(String(10), nullable=False) # Buy / Sell
-    TradeAsset = Column(String(10), nullable=False) # Gold, Stock, Currency...
+    TradeType = Column(Integer, nullable=False)  # 1=Buy, 2=Sell (TradeTypeEnum)
+    TradeAsset = Column(String(10), nullable=True)  # DEPRECATED: Kept temporarily for data migration
+    TradingPairID = Column(Integer, ForeignKey("TradingPairs.PairID", ondelete="RESTRICT"), nullable=True, index=True)  # New normalized reference
     TradeLotsize = Column(DECIMAL(10, 2), nullable=False)
     TradeOpenPrice = Column(DECIMAL(10, 5), nullable=False)
     TradeClosePrice = Column(DECIMAL(10, 5), nullable=True)
@@ -17,9 +18,7 @@ class Trade(Base):
     TradeCloseTime = Column(DateTime, nullable=True)
     TradeProfitLose = Column(DECIMAL(12, 2), nullable=True) # Changed to DECIMAL(12, 2) as per migration in main.py
     TradeStatus = Column(String(20), default='Open') # Winning/Losing/Open
-    TradeSL = Column(DECIMAL(10, 5), nullable=True) # Stop Loss
-    TradeTP = Column(DECIMAL(10, 5), nullable=True) # Take Profit
 
-    # Relationship
-    # Relationship
+    # Relationships
     account = relationship("Account", backref=backref("trades", cascade="all, delete-orphan"))
+    trading_pair = relationship("TradingPair", backref="trades")

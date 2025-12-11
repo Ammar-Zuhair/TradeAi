@@ -19,7 +19,7 @@ import { HeadingText, BodyText } from '@/components/StyledText';
 import TradeCard, { TradeType } from '@/components/TradeCard';
 
 export default function TradingScreen() {
-  const { accounts, getAccountTrades, activeAccountId } = useAccounts();
+  const { accounts, getAccountTrades, activeAccountId, closeTrade } = useAccounts();
   const { colors } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState('all');
@@ -244,7 +244,19 @@ export default function TradingScreen() {
                 key={trade.id}
                 entering={FadeInDown.delay(300 + (index * 100)).springify()}
               >
-                <TradeCard trade={trade} onPress={handleTradePress} />
+                <TradeCard
+                  trade={trade}
+                  onPress={handleTradePress}
+                  showAccountName={!activeAccountId}
+                  onCloseTrade={async (ticket) => {
+                    const result = await closeTrade(ticket);
+                    if (result.success) {
+                      Alert.alert('Success', result.message);
+                    } else {
+                      Alert.alert('Error', result.message);
+                    }
+                  }}
+                />
               </Animated.View>
             ))
           )}

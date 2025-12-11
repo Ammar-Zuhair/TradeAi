@@ -76,6 +76,44 @@ async def create_account(
     db.commit()
     db.refresh(new_account)
     
+    # ✅ Automatically create symbol mappings
+    try:
+        from utils.mt5_symbols import get_mt5_symbols, suggest_symbol_mapping, create_symbol_mappings
+        
+        # Get available symbols from MT5
+        symbols = get_mt5_symbols(
+            login=account.AccountLoginNumber,
+            password=account.AccountLoginPassword,
+            server=account.AccountLoginServer
+        )
+        
+        if symbols:
+            # Get automatic mapping suggestions
+            suggestions = suggest_symbol_mapping(new_account.AccountID, symbols)
+            
+            if suggestions:
+                # Create mappings automatically
+                mapping_dicts = [
+                    {
+                        'account_symbol': s['account_symbol'],
+                        'trading_pair_id': s['suggested_trading_pair_id']
+                    }
+                    for s in suggestions if s['suggested_trading_pair_id']
+                ]
+                
+                if mapping_dicts:
+                    success = create_symbol_mappings(new_account.AccountID, mapping_dicts)
+                    if success:
+                        print(f"✅ Created {len(mapping_dicts)} symbol mappings automatically")
+                    else:
+                        print("⚠️ Failed to create some symbol mappings")
+        else:
+            print("⚠️ Could not fetch MT5 symbols for automatic mapping")
+            
+    except Exception as e:
+        print(f"⚠️ Symbol mapping creation failed (non-critical): {e}")
+        # Don't fail the account creation if symbol mapping fails
+    
     return MT5VerificationResponse(
         success=True,
         message=f"Account verified and added successfully! Balance: ${mt5_data.get('balance', 0):.2f}",
@@ -96,17 +134,13 @@ async def create_account(
 
 @router.get("", response_model=List[AccountResponse])
 async def get_all_accounts(
-    user_id: Optional[int] = Query(None, alias="userID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get all accounts, optionally filter by user ID"""
-    query = db.query(Account)
-    
-    if user_id is not None:
-        query = query.filter(Account.UserID == user_id)
-    
-    accounts = query.all()
+    """Get all accounts for the current user"""
+    # STRICT SECURITY: Only return accounts belonging to the authenticated user
+    # Do NOT rely on client-provided UserID
+    accounts = db.query(Account).filter(Account.UserID == current_user.UserID).all()
     return accounts
 
 

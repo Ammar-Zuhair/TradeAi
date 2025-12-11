@@ -5,6 +5,7 @@ import { ArrowLeft, Mail } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { authService } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 import Colors from '@/constants/Colors';
 import Layout from '@/constants/Layout';
 import { HeadingText, BodyText } from '@/components/StyledText';
@@ -12,6 +13,7 @@ import Button from '@/components/Button';
 
 export default function VerifyEmailScreen() {
     const params = useLocalSearchParams();
+    const { setUser } = useAuth();
     const email = params.email as string;
     const name = params.name as string;
     const password = params.password as string;
@@ -89,13 +91,23 @@ export default function VerifyEmailScreen() {
                 }
             );
 
-            // Save user and navigate
-            await AsyncStorage.setItem('user', JSON.stringify({
+            // Create user object
+            const appUser = {
                 id: registerResponse.user.UserID.toString(),
                 name: registerResponse.user.UserName,
                 email: registerResponse.user.UserEmail,
-                token: registerResponse.access_token
-            }));
+                token: registerResponse.access_token,
+                phoneNumber: registerResponse.user.PhoneNumber,
+                address: registerResponse.user.Address,
+                idCardNumber: registerResponse.user.UserIDCardrNumber ? registerResponse.user.UserIDCardrNumber.toString() : undefined,
+                dateOfBirth: registerResponse.user.DateOfBirth
+            };
+
+            // Save user to storage
+            await AsyncStorage.setItem('user', JSON.stringify(appUser));
+
+            // Sync with AuthContext - THIS WAS MISSING
+            setUser(appUser);
 
             router.replace('/(tabs)');
         } catch (err: any) {
@@ -177,6 +189,8 @@ export default function VerifyEmailScreen() {
                             keyboardType="number-pad"
                             maxLength={1}
                             selectTextOnFocus
+                            // Force LTR for OTP input even in RTL mode
+                            textAlign='center'
                         />
                     ))}
                 </View>
@@ -263,6 +277,7 @@ const styles = StyleSheet.create({
     },
     otpContainer: {
         flexDirection: 'row',
+        direction: 'ltr', // Force Left-to-Right layout
         justifyContent: 'space-between',
         marginBottom: Layout.spacing.lg,
     },

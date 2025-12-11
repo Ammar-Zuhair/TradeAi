@@ -1,49 +1,47 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
 from decimal import Decimal
 
 
-class TradeBase(BaseModel):
-    TradeSymbol: Optional[str] = None # Renamed from TradeAsset in model? No, model has TradeAsset.
-    # Let's check model again.
-    # Model: TradeAsset, TradeType, TradeLotsize, TradeOpenPrice, TradeOpenTime, TradeStatus, TradeProfitLose
-    # Schema used TradeSymbol. Let's align with Model or keep as is if mapped.
-    # Router maps TradeSymbol -> TradeSymbol? No, Router: TradeSymbol=trade.TradeSymbol.
-    # Model doesn't have TradeSymbol! Model has TradeAsset.
-    # I should check routers/trades.py again.
-    pass
-
 class TradeCreate(BaseModel):
-    TradeID: int # Ticket Number
+    TradeID: int  # Ticket Number
     AccountID: int
-    TradeType: str
-    TradeAsset: str
+    TradeType: int  # 1=Buy, 2=Sell
+    TradingPairID: Optional[int] = None  # Foreign key to TradingPairs
+    TradeAsset: Optional[str] = None  # DEPRECATED: Use TradingPairID instead
     TradeLotsize: Decimal
     TradeOpenPrice: Decimal
     TradeOpenTime: datetime
+    
+    @field_validator('TradeType')
+    @classmethod
+    def validate_trade_type(cls, v):
+        if v not in [1, 2]:
+            raise ValueError('TradeType must be 1 (Buy) or 2 (Sell)')
+        return v
+
 
 class TradeUpdate(BaseModel):
     TradeClosePrice: Optional[Decimal] = None
     TradeCloseTime: Optional[datetime] = None
     TradeStatus: Optional[str] = None
-    TradeProfitLose: Optional[Decimal] = None # Fixed name
+    TradeProfitLose: Optional[Decimal] = None
+
 
 class TradeResponse(BaseModel):
     TradeID: int
     AccountID: int
-    # TradeTicket removed
-    TradeType: str
-    TradeAsset: str
+    TradeType: int  # 1=Buy, 2=Sell
+    TradingPairID: Optional[int] = None
+    TradeAsset: Optional[str] = None  # DEPRECATED
     TradeLotsize: Decimal
     TradeOpenPrice: Decimal
     TradeOpenTime: datetime
     TradeClosePrice: Optional[Decimal] = None
     TradeCloseTime: Optional[datetime] = None
     TradeStatus: str
-    TradeProfitLose: Optional[Decimal] = None # Fixed name
-    TradeSL: Optional[Decimal] = None # Stop Loss
-    TradeTP: Optional[Decimal] = None # Take Profit
+    TradeProfitLose: Optional[Decimal] = None
     
     class Config:
         from_attributes = True

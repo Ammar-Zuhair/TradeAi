@@ -130,7 +130,7 @@ async def close_single_trade(
 ):
     """Close a single trade by ticket number"""
     import MetaTrader5 as mt5
-    from utils.encryption import decrypt
+    from utils.security import decrypt
     
     # Find the trade
     trade = db.query(Trade).filter(Trade.TradeID == ticket).first()
@@ -212,11 +212,18 @@ async def close_single_trade(
             "ticket": ticket
         }
         
+    except HTTPException as he:
+        mt5.shutdown()
+        raise he
     except Exception as e:
         mt5.shutdown()
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"❌ Error closing trade {ticket}: {str(e)}")
+        print(f"Traceback: {error_details}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail=f"Failed to close trade: {str(e)}"
         )
 
 

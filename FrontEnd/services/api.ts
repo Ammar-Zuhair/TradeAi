@@ -158,9 +158,8 @@ export const userService = {
 };
 
 export const accountService = {
-    getAccounts: async (token: string, userId?: number) => {
-        const url = userId ? `/accounts?userID=${userId}` : '/accounts';
-        const response = await api.get(url, {
+    getAccounts: async (token: string) => {
+        const response = await api.get('/accounts', {
             headers: {
                 Authorization: `Bearer ${token}`
             }

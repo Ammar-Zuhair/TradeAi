@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models.trade import Trade
 from models.account import Account
-from security import decrypt
+from utils.security import decrypt
 from utils.mt5_service import MT5Service
 
 logger = logging.getLogger(__name__)
@@ -67,8 +67,8 @@ class TradeMonitor:
             
             # Decrypt credentials
             login = account.AccountLoginNumber
-            password = decrypt(account.AccountPassword)
-            server = account.AccountServer
+            password = decrypt(account.AccountLoginPassword)
+            server = account.AccountLoginServer
             
             # Connect to MT5 and get account info
             account_info = await self.mt5_service.get_account_info(login, password, server)
@@ -78,7 +78,7 @@ class TradeMonitor:
                 return
             
             # Get current positions from MT5
-            positions = await self.mt5_service.get_open_positions(login, password, server, account.AccountAsset)
+            positions = await self.mt5_service.get_open_positions(login, password, server)
             
             # Create a set of open position tickets for quick lookup
             open_tickets = set()

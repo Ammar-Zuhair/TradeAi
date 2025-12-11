@@ -7,6 +7,11 @@ from schemas.auth import (
     OTPRequest, OTPVerify, PasswordResetRequest, PasswordReset,
     GoogleAuthRequest, FacebookAuthRequest
 )
+import sys
+import os
+
+# أضف المسار الكامل للمجلد الثاني
+sys.path.append(os.path.abspath("../utils"))
 from schemas.user import UserResponse, UserUpdate
 from utils.security import (
     hash_password, verify_password, create_access_token,
@@ -37,13 +42,19 @@ async def send_otp(request: OTPRequest, db: Session = Depends(get_db)):
     otp = generate_otp()
     store_otp(request.email, otp)
     
-    # TODO: Send OTP via email service
-    # For now, return it in response (ONLY FOR DEVELOPMENT)
+    # Send OTP via email
+    from utils.email_service import send_email_otp
+    email_sent = send_email_otp(request.email, otp)
+    
+    msg = "OTP sent successfully"
+    if not email_sent:
+        msg = "OTP generated (Email failed - Check logs)"
+    
     print(f"OTP for {request.email}: {otp}")
     
     return {
-        "message": "OTP sent successfully",
-        "otp": otp,  # Remove this in production
+        "message": msg,
+        "otp": otp,  # Keep for dev/testing, remove in prod ideally
         "email": request.email
     }
 
@@ -229,12 +240,15 @@ async def forgot_password(request: PasswordResetRequest, db: Session = Depends(g
     otp = generate_otp()
     store_otp(request.email, otp)
     
-    # TODO: Send OTP via email service
+    # Send OTP via email
+    from utils.email_service import send_email_otp
+    send_email_otp(request.email, otp)
+    
     print(f"Password Reset OTP for {request.email}: {otp}")
     
     return {
         "message": "OTP sent successfully",
-        "otp": otp  # Remove this in production
+        "otp": otp
     }
 
 

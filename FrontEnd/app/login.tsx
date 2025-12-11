@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Image, TouchableOpacity, ScrollView } from 'react-native';
+import { View, StyleSheet, Image, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import * as Network from 'expo-network';
 import { router } from 'expo-router';
 import { Lock, Mail, ArrowRight, Fingerprint } from 'lucide-react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
@@ -125,8 +126,29 @@ export default function LoginScreen() {
     return isValid;
   };
 
+
+
+  // ... (inside component)
+
   const handleLogin = async () => {
-    if (validateForm()) {
+    if (!validateForm()) return;
+
+    try {
+      const networkState = await Network.getNetworkStateAsync();
+      if (!networkState.isConnected || !networkState.isInternetReachable) {
+        Alert.alert(
+          "No Internet Connection",
+          "Please check your internet connection and try again.",
+          [
+            { text: "Retry", onPress: handleLogin }
+          ]
+        );
+        return;
+      }
+
+      await signIn(email, password);
+    } catch (e) {
+      // Fallback if network check fails
       await signIn(email, password);
     }
   };
@@ -164,7 +186,7 @@ export default function LoginScreen() {
     >
       <View style={styles.header}>
         <Image
-          source={ require('../assets/images/icon.jpg' )}
+          source={require('../assets/images/icon.jpg')}
           style={styles.logo}
         />
         <HeadingText style={[styles.title, themeStyles.title]}>TradeAI</HeadingText>

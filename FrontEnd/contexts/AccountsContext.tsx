@@ -24,6 +24,7 @@ type AccountsContextType = {
   allHistory: TradeType[];
   activeAccountId: string | null;
   setActiveAccount: (id: string | null) => void;
+  closeTrade: (ticket: number) => Promise<{ success: boolean; message: string }>;
   clearError: () => void;
 };
 
@@ -39,6 +40,7 @@ const AccountsContext = createContext<AccountsContextType>({
   allHistory: [],
   activeAccountId: null,
   setActiveAccount: () => { },
+  closeTrade: async () => ({ success: false, message: 'Not initialized' }),
   clearError: () => { },
 });
 
@@ -75,8 +77,8 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!silent) setError(null);
 
     try {
-      const userId = parseInt(user.id); // Convert string id to number
-      const response = await accountService.getAccounts(user.token, userId);
+      // Backend now determines user from token, no need to pass ID
+      const response = await accountService.getAccounts(user.token);
 
       // Transform API response to AccountType format
       const transformedAccounts: AccountType[] = response.map((acc: any) => ({
@@ -231,6 +233,22 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const allHistory = React.useMemo(() => Object.values(history).flat(), [history]);
 
+  const closeTrade = async (ticket: number): Promise<{ success: boolean; message: string }> => {
+    if (!user || !user.token) {
+      return { success: false, message: 'User not authenticated' };
+    }
+
+    try {
+      const response = await tradeService.closeTrade(user.token, ticket);
+      await refreshAccounts();
+      return { success: true, message: response.message || 'Trade closed successfully' };
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.detail || 'Failed to close trade';
+      setError(errorMessage);
+      return { success: false, message: errorMessage };
+    }
+  };
+
   const clearError = () => {
     setError(null);
   };
@@ -249,6 +267,7 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         allHistory,
         activeAccountId,
         setActiveAccount,
+        closeTrade,
         clearError,
       }}
     >

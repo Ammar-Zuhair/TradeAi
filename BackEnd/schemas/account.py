@@ -9,8 +9,9 @@ TradingStrategyType = Literal["All", "FVG + Trend", "Voting"]
 
 class AccountBase(BaseModel):
     AccountName: Optional[str] = None
-    AccountType: Optional[str] = "Unknown"
-    AccountLoginServer: Optional[str] = None
+    AccountType: Optional[int] = 1  # 1=Demo, 2=Real
+    ServerID: Optional[int] = None  # Foreign key to PlatformServers
+    AccountLoginServer: Optional[str] = None  # DEPRECATED: Use ServerID instead
     AccountLoginNumber: Optional[int] = None
     TradingStrategy: Optional[TradingStrategyType] = "All"
 
@@ -30,11 +31,19 @@ class AccountCreate(AccountBase):
             if v > 10:
                 raise ValueError('Risk percentage cannot exceed 10%')
         return v
+    
+    @field_validator('AccountType')
+    @classmethod
+    def validate_account_type(cls, v):
+        if v is not None and v not in [1, 2]:
+            raise ValueError('AccountType must be 1 (Demo) or 2 (Real)')
+        return v
 
 
 class AccountUpdate(BaseModel):
     AccountName: Optional[str] = None
-    AccountType: Optional[str] = None
+    AccountType: Optional[int] = None  # 1=Demo, 2=Real
+    ServerID: Optional[int] = None
     AccountLoginServer: Optional[str] = None
     AccountLoginNumber: Optional[int] = None
     AccountLoginPassword: Optional[str] = None
@@ -50,6 +59,13 @@ class AccountUpdate(BaseModel):
                 raise ValueError('Risk percentage cannot be negative')
             if v > 10:
                 raise ValueError('Risk percentage cannot exceed 10%')
+        return v
+    
+    @field_validator('AccountType')
+    @classmethod
+    def validate_account_type(cls, v):
+        if v is not None and v not in [1, 2]:
+            raise ValueError('AccountType must be 1 (Demo) or 2 (Real)')
         return v
 
 
@@ -71,4 +87,3 @@ class MT5VerificationResponse(BaseModel):
     message: str
     account: Optional[AccountResponse] = None
     mt5_info: Optional[Dict[str, Any]] = None  # Additional MT5 account details
-

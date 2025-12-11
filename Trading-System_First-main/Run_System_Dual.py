@@ -42,7 +42,7 @@ from tensorflow import keras
 
 
 
-from BackEnd import database
+import database
 
 try:
     from env_loader import Config
@@ -65,6 +65,16 @@ from user import User
 from security import decrypt
 from sqlalchemy.orm import Session
 
+# ==================== NEW IMPORTS FOR DATABASE INTEGRATION ====================
+from account_helper import (
+    get_account_trading_info,
+    get_account_symbol,
+    save_trade_to_db,
+    update_trade_close,
+    get_active_accounts
+)
+from enums import TradeTypeEnum
+
 # ==================== CONFIG ====================
 SYMBOL = Config.SYMBOL
 FVG_STRONG_THRESHOLD = Config.FVG_STRONG_THRESHOLD
@@ -83,6 +93,8 @@ MAX_LOT_SIZE = 10.0
 
 
 # ==================== SHARED STATE & CONTEXT ====================
+import subprocess
+
 class MT5Context:
     def __init__(self):
         self.lock = threading.Lock()
@@ -121,6 +133,9 @@ class SharedState:
         self.active_fvg_zones = []
         self.last_update_time = None
         self.should_stop = threading.Event()
+        self.last_news_fetch = None
+        self.news_csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'recommendations.csv')
+        self.notified_news_events = set()
         
     def update_zones(self, zones):
         with self.lock:
@@ -134,15 +149,118 @@ class SharedState:
     def stop_all(self):
         self.should_stop.set()
 
+    def fetch_daily_news(self):
+        """Fetch high-impact news using getNews.py if not fetched today"""
+        today = datetime.now().date()
+        if self.last_news_fetch and self.last_news_fetch.date() == today:
+            return # Already fetched today
+
+        print("\n" + "="*60)
+        print("📰 FETCHING DAILY NEWS")
+        print("="*60)
+        
+        try:
+            # Run getNews.py
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            result = subprocess.run(
+                [sys.executable, os.path.join(script_dir, 'getNews.py')],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            
+            if result.returncode == 0:
+                print("✅ News fetched successfully")
+                self.last_news_fetch = datetime.now()
+            else:
+                print(f"❌ News fetch failed: {result.stderr}")
+                
+        except Exception as e:
+            print(f"❌ News fetch error: {e}")
+
+    def check_news_window(self):
+        """Check if there's high-impact news within ±30 minutes"""
+        if not os.path.exists(self.news_csv_path):
+            return False  # No news file, safe to trade
+        
+        try:
+            news_df = pd.read_csv(self.news_csv_path, encoding='utf-8')
+            
+            if len(news_df) == 0:
+                return False
+            
+            now = datetime.now()
+            
+            for _, row in news_df.iterrows():
+                # Parse news time
+                news_date = row['تاريخ الحدث']  # Date
+                news_time = row['الوقت']  # Time
+                
+                # Combine date and time
+                try:
+                    news_datetime = datetime.strptime(f"{news_date} {news_time}", "%Y-%m-%d %I:%M%p")
+                except:
+                    try:
+                        news_datetime = datetime.strptime(f"{news_date} {news_time}", "%Y-%m-%d %H:%M")
+                    except:
+                        continue
+                
+                # Check if within window
+                time_diff = abs((news_datetime - now).total_seconds() / 60)
+                
+                if time_diff <= NEWS_WINDOW_MINUTES:
+                    event_name = row['الحدث']
+                    print(f"⚠️ HIGH-IMPACT NEWS DETECTED!")
+                    print(f"   Event: {event_name}")
+                    print(f"   Time: {news_datetime}")
+                    print(f"   Minutes away: {time_diff:.1f}")
+                    
+                    # SEND NOTIFICATION if not sent yet
+                    event_id = f"{news_date}_{news_time}_{event_name}"
+                    if event_id not in self.notified_news_events:
+                        try:
+                            # Import here to avoid circular dependencies if any
+                            from utils.notifications import send_push_notification
+                            db: Session = SessionLocal()
+                            users = db.query(User).filter(User.IsNotificationsEnabled == True, User.PushToken != None).all()
+                            
+                            sent_count = 0
+                            for user in users:
+                                if user.PushToken:
+                                    time_desc = "الآن" if time_diff < 1 else f"خلال {int(time_diff)} دقيقة"
+                                    send_push_notification(
+                                        token=user.PushToken,
+                                        title="⚠️ تنبيه خبر هام",
+                                        body=f"خبر قوي {time_desc}: {event_name}\nتم إيقاف التداول مؤقتاً.",
+                                        data={"type": "news", "event": event_name}
+                                    )
+                                    sent_count += 1
+                            
+                            db.close()
+                            print(f"📲 Notification sent to {sent_count} users.")
+                            self.notified_news_events.add(event_id)
+                            
+                        except Exception as e:
+                            print(f"❌ Failed to send news notification: {e}")
+                    
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"❌ News check error: {e}")
+            return False  # If error, assume safe to trade
+
 
 # ==================== BASE MONITOR ====================
 class AccountMonitor:
-    def __init__(self, account_name, credentials, shared_state, strategy_type, mt5_context):
+    def __init__(self, account_name, credentials, shared_state, strategy_type, mt5_context, account_id):
         self.account_name = account_name
         self.credentials = credentials
         self.shared_state = shared_state
         self.strategy_type = strategy_type
         self.mt5_context = mt5_context
+        self.account_id = account_id  # ✅ Added for database integration
         
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         self.models_dir = os.path.join(self.script_dir, MODELS_DIR)
@@ -313,9 +431,28 @@ class AccountMonitor:
         # so we assume MT5 is initialized and on the correct account.
         
         try:
-            symbol_info = mt5.symbol_info(SYMBOL)
-            tick = mt5.symbol_info_tick(SYMBOL)
+            # ✅ Get account info to find the correct symbol for this user
+            account_info = get_account_trading_info(self.account_id)
+            
+            if not account_info:
+                self.logger.error("❌ Failed to get account info")
+                return False
+            
+            # ✅ Get the actual symbol used in this account
+            # SYMBOL is our standardized pair name (e.g., 'GOLD')
+            user_symbol = account_info['symbol_mappings'].get(SYMBOL)
+            
+            if not user_symbol:
+                self.logger.error(f"❌ No symbol mapping found for {SYMBOL}")
+                self.logger.error(f"   Available mappings: {list(account_info['symbol_mappings'].keys())}")
+                return False
+            
+            self.logger.info(f"📍 Using symbol: {user_symbol} (mapped from {SYMBOL})")
+            
+            symbol_info = mt5.symbol_info(user_symbol)
+            tick = mt5.symbol_info_tick(user_symbol)
             if not symbol_info or not tick:
+                self.logger.error(f"❌ Failed to get symbol info for {user_symbol}")
                 return False
             
             current_bid, current_ask = tick.bid, tick.ask
@@ -332,6 +469,7 @@ class AccountMonitor:
                 tp = entry_price + (risk * 5.0)
                 price = current_ask
                 order_type = mt5.ORDER_TYPE_BUY
+                trade_type_int = TradeTypeEnum.BUY  # ✅ Integer: 1
             else:
                 entry_price = fvg_top - 0.5
                 sl = fvg_top + 1.0
@@ -339,6 +477,7 @@ class AccountMonitor:
                 tp = entry_price - (risk * 5.0)
                 price = current_bid
                 order_type = mt5.ORDER_TYPE_SELL
+                trade_type_int = TradeTypeEnum.SELL  # ✅ Integer: 2
             
             sl_distance_mt5_points = abs(sl - price) / point
             lot_size = self.calculate_lot_size(sl_distance_mt5_points)
@@ -348,7 +487,7 @@ class AccountMonitor:
             
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": SYMBOL,
+                "symbol": user_symbol,  # ✅ Use user's actual symbol
                 "volume": lot_size,
                 "type": order_type,
                 "price": price,
@@ -369,31 +508,25 @@ class AccountMonitor:
                 self.logger.info(f"✅ ORDER EXECUTED! Ticket: {result.order}")
                 self.mark_zone_as_used(zone)
                 
-                # Log trade to Database
-                try:
-                    db: Session = SessionLocal()
-                    # Find account ID based on login
-                    account = db.query(Account).filter(Account.AccountLoginNumber == self.credentials['login']).first()
-                    if account:
-                        new_trade = Trade(
-                            TradeID=result.order, # Use Ticket as ID
-                            AccountID=account.AccountID,
-                            # TradeTicket removed
-                            TradeType=action,
-                            TradeAsset=SYMBOL,
-                            TradeLotsize=lot_size,
-                            TradeOpenPrice=result.price,
-                            TradeOpenTime=datetime.now(),
-                            TradeStatus='Open',
-                            TradeSL=sl,
-                            TradeTP=tp
-                        )
-                        db.add(new_trade)
-                        db.commit()
-                        self.logger.info(f"💾 Trade saved to DB (ID: {new_trade.TradeID}, Ticket: {result.order})")
-                        
-                        # Send Notification
-                        try:
+                # ✅ Save trade to database using new schema
+                success = save_trade_to_db(
+                    trade_id=result.order,
+                    account_id=self.account_id,
+                    trade_type=trade_type_int,  # Integer: 1 or 2
+                    our_pair_name=SYMBOL,  # Our standardized name (e.g., 'GOLD')
+                    lot_size=lot_size,
+                    open_price=result.price,
+                    open_time=datetime.now()
+                )
+                
+                if success:
+                    self.logger.info(f"💾 Trade saved to DB")
+                    
+                    # Send Notification
+                    try:
+                        db: Session = SessionLocal()
+                        account = db.query(Account).filter(Account.AccountID == self.account_id).first()
+                        if account:
                             user = db.query(User).filter(User.UserID == account.UserID).first()
                             if user and user.IsNotificationsEnabled and user.PushToken:
                                 from utils.notifications import send_push_notification
@@ -402,17 +535,14 @@ class AccountMonitor:
                                 send_push_notification(
                                     token=user.PushToken,
                                     title=f"صفقة {action_ar} جديدة 🚀",
-                                    body=f"{action} {SYMBOL} @ {result.price}\nالحساب: {account_name}",
-                                    data={"trade_id": new_trade.TradeID, "account_name": account_name}
+                                    body=f"{action} {user_symbol} @ {result.price}\nالحساب: {account_name}",
+                                    data={"trade_id": result.order, "account_name": account_name}
                                 )
-                        except Exception as e:
-                            self.logger.error(f"⚠️ Failed to send notification: {e}")
-                    else:
-                        self.logger.error(f"❌ Account not found in DB for login: {self.credentials['login']}")
-
-                    db.close()
-                except Exception as e:
-                    self.logger.error(f"❌ Failed to save trade to DB: {e}")
+                        db.close()
+                    except Exception as e:
+                        self.logger.error(f"⚠️ Failed to send notification: {e}")
+                else:
+                    self.logger.error("❌ Failed to save trade to DB")
 
                 if ENABLE_SOUND_ALERT:
                     try:
@@ -426,6 +556,8 @@ class AccountMonitor:
                 return False
         except Exception as e:
             self.logger.error(f"❌ Trade execution failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def run(self):
@@ -434,8 +566,8 @@ class AccountMonitor:
 
 # ==================== ADVANCED STRATEGY ====================
 class AdvancedStrategyMonitor(AccountMonitor):
-    def __init__(self, credentials, shared_state, mt5_context):
-        super().__init__('ADV', credentials, shared_state, 'advanced', mt5_context)
+    def __init__(self, credentials, shared_state, mt5_context, account_id):
+        super().__init__('ADV', credentials, shared_state, 'advanced', mt5_context, account_id)
     
     def check_advanced_conditions(self, zone, bid, ask):
         """Full conditions: FVG + Price Prediction + Voting"""
@@ -554,6 +686,12 @@ class AdvancedStrategyMonitor(AccountMonitor):
 
         try:
             while not self.shared_state.should_stop.is_set():
+                # Check News Window FIRST
+                if self.shared_state.check_news_window():
+                    self.logger.warning("⛔ Trading paused due to High Impact News")
+                    time.sleep(60)
+                    continue
+
                 # Execute the logic step within the strict context
                 self.mt5_context.execute(self.credentials, logic_step)
                 
@@ -566,8 +704,8 @@ class AdvancedStrategyMonitor(AccountMonitor):
 
 # ==================== SIMPLE STRATEGY ====================
 class SimpleStrategyMonitor(AccountMonitor):
-    def __init__(self, credentials, shared_state, mt5_context):
-        super().__init__('SIMPLE', credentials, shared_state, 'simple', mt5_context)
+    def __init__(self, credentials, shared_state, mt5_context, account_id):
+        super().__init__('SIMPLE', credentials, shared_state, 'simple', mt5_context, account_id)
     
     def check_simple_conditions(self, zone, bid, ask):
         """Simple: FVG strong + trend ONLY"""
@@ -620,6 +758,12 @@ class SimpleStrategyMonitor(AccountMonitor):
         
         try:
             while not self.shared_state.should_stop.is_set():
+                # Check News Window FIRST
+                if self.shared_state.check_news_window():
+                    self.logger.warning("⛔ Trading paused due to High Impact News")
+                    time.sleep(60)
+                    continue
+                    
                 self.mt5_context.execute(self.credentials, logic_step)
                 time.sleep(REALTIME_CHECK_SECONDS)
         except KeyboardInterrupt:
@@ -630,8 +774,8 @@ class SimpleStrategyMonitor(AccountMonitor):
 
 # ==================== VOTING STRATEGY ====================
 class VotingStrategyMonitor(AccountMonitor):
-    def __init__(self, credentials, shared_state, mt5_context):
-        super().__init__('VOTING', credentials, shared_state, 'voting', mt5_context)
+    def __init__(self, credentials, shared_state, mt5_context, account_id):
+        super().__init__('VOTING', credentials, shared_state, 'voting', mt5_context, account_id)
         self.last_check_time = datetime.now()
         
     def get_full_voting_recommendation(self):
@@ -708,7 +852,7 @@ class VotingStrategyMonitor(AccountMonitor):
         """
         try:
             # Fetch last 10 candles (M15 timeframe)
-            rates = mt5.copy_rates_from_pos(SYMBOL, mt5.TIMEFRAME_M15, 0, 10)
+            rates = mt5.copy_rates_from_pos(SYMBOL, mt5.TIMEFRAME_M1, 0, 15)
             
             if rates is None or len(rates) < 10:
                 self.logger.warning("⚠️ Could not fetch enough candles for dynamic SL/TP, using fallback")
@@ -764,8 +908,23 @@ class VotingStrategyMonitor(AccountMonitor):
         
         # Assumes MT5Context is active
         try:
-            symbol_info = mt5.symbol_info(SYMBOL)
-            tick = mt5.symbol_info_tick(SYMBOL)
+            # ✅ Get account info and symbol mapping
+            account_info = get_account_trading_info(self.account_id)
+            
+            if not account_info:
+                self.logger.error("❌ Failed to get account info")
+                return False
+            
+            user_symbol = account_info['symbol_mappings'].get(SYMBOL)
+            
+            if not user_symbol:
+                self.logger.error(f"❌ No symbol mapping found for {SYMBOL}")
+                return False
+            
+            self.logger.info(f"📍 Using symbol: {user_symbol} (mapped from {SYMBOL})")
+            
+            symbol_info = mt5.symbol_info(user_symbol)
+            tick = mt5.symbol_info_tick(user_symbol)
             if not symbol_info or not tick:
                 return False
                 
@@ -776,9 +935,11 @@ class VotingStrategyMonitor(AccountMonitor):
             if action == 'BUY':
                 price = current_ask
                 order_type = mt5.ORDER_TYPE_BUY
+                trade_type_int = TradeTypeEnum.BUY  # ✅ Integer: 1
             else:
                 price = current_bid
                 order_type = mt5.ORDER_TYPE_SELL
+                trade_type_int = TradeTypeEnum.SELL  # ✅ Integer: 2
             
             # Calculate dynamic SL/TP based on last 10 candles
             sl, tp = self.calculate_dynamic_sl_tp(action, price)
@@ -804,7 +965,7 @@ class VotingStrategyMonitor(AccountMonitor):
             
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": SYMBOL,
+                "symbol": user_symbol,  # ✅ Use user's actual symbol
                 "volume": lot_size,
                 "type": order_type,
                 "price": price,
@@ -824,30 +985,21 @@ class VotingStrategyMonitor(AccountMonitor):
             if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                 self.logger.info(f"✅ ORDER EXECUTED! Ticket: {result.order}")
                 
-                # Log trade to Database
-                try:
-                    db: Session = SessionLocal()
-                    account = db.query(Account).filter(Account.AccountLoginNumber == self.credentials['login']).first()
-                    if account:
-                        new_trade = Trade(
-                            TradeID=result.order, # Use Ticket as ID
-                            AccountID=account.AccountID,
-                            # TradeTicket removed
-                            TradeType=action,
-                            TradeAsset=SYMBOL,
-                            TradeLotsize=lot_size,
-                            TradeOpenPrice=result.price,
-                            TradeOpenTime=datetime.now(),
-                            TradeStatus='Open',
-                            TradeSL=sl,
-                            TradeTP=tp
-                        )
-                        db.add(new_trade)
-                        db.commit()
-                        self.logger.info(f"💾 Trade saved to DB (ID: {new_trade.TradeID}, Ticket: {result.order})")
-                    db.close()
-                except Exception as e:
-                    self.logger.error(f"❌ Failed to save trade to DB: {e}")
+                # ✅ Save trade to database using new schema
+                success = save_trade_to_db(
+                    trade_id=result.order,
+                    account_id=self.account_id,
+                    trade_type=trade_type_int,  # Integer: 1 or 2
+                    our_pair_name=SYMBOL,
+                    lot_size=lot_size,
+                    open_price=result.price,
+                    open_time=datetime.now()
+                )
+                
+                if success:
+                    self.logger.info(f"💾 Trade saved to DB")
+                else:
+                    self.logger.error("❌ Failed to save trade to DB")
 
                 if ENABLE_SOUND_ALERT:
                     try:
@@ -862,6 +1014,8 @@ class VotingStrategyMonitor(AccountMonitor):
                 
         except Exception as e:
             self.logger.error(f"❌ Trade execution failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def run(self):
@@ -911,6 +1065,12 @@ class VotingStrategyMonitor(AccountMonitor):
 
         try:
             while not self.shared_state.should_stop.is_set():
+                # Check News Window FIRST
+                if self.shared_state.check_news_window():
+                    self.logger.warning("⛔ Trading paused due to High Impact News")
+                    time.sleep(60)
+                    continue
+
                 result = self.mt5_context.execute(self.credentials, logic_step)
                 
                 if result == "SLEEP":
@@ -1067,8 +1227,14 @@ class DataUpdater:
             if not os.path.exists(self.fvg_csv_path):
                 self.logger.info("\n📊 Initial FVG analysis...")
                 self.run_fvg_analysis()
+                
+            # Initial News Fetch
+            self.shared_state.fetch_daily_news()
             
             while not self.shared_state.should_stop.is_set():
+                # Daily News Fetch Check (will only run once per day)
+                self.shared_state.fetch_daily_news()
+                
                 # Run FVG analysis every cycle using strict context
                 self.mt5_context.execute(self.credentials, self.run_fvg_analysis)
                 
@@ -1440,23 +1606,24 @@ def main():
                 }
                 
                 strategy = acc.TradingStrategy
+                account_id = acc.AccountID  # ✅ Get account_id
                 
                 if strategy == 'All': # Advanced
-                    monitor = AdvancedStrategyMonitor(creds, shared_state, mt5_context)
+                    monitor = AdvancedStrategyMonitor(creds, shared_state, mt5_context, account_id)  # ✅ Pass account_id
                     t = threading.Thread(target=monitor.run, daemon=True)
                     t.start()
                     threads.append(t)
                     print(f"✅ Started ADVANCED strategy for Account {acc.AccountLoginNumber}")
                     
                 elif strategy == 'FVG + Trend': # Simple
-                    monitor = SimpleStrategyMonitor(creds, shared_state, mt5_context)
+                    monitor = SimpleStrategyMonitor(creds, shared_state, mt5_context, account_id)  # ✅ Pass account_id
                     t = threading.Thread(target=monitor.run, daemon=True)
                     t.start()
                     threads.append(t)
                     print(f"✅ Started SIMPLE strategy for Account {acc.AccountLoginNumber}")
                     
                 elif strategy == 'Voting': # Voting
-                    monitor = VotingStrategyMonitor(creds, shared_state, mt5_context)
+                    monitor = VotingStrategyMonitor(creds, shared_state, mt5_context, account_id)  # ✅ Pass account_id
                     t = threading.Thread(target=monitor.run, daemon=True)
                     t.start()
                     threads.append(t)

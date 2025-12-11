@@ -34,7 +34,7 @@ class Config:
     ENABLE_SIMPLE_STRATEGY = os.getenv('ENABLE_SIMPLE_STRATEGY', 'true').lower() == 'true'
     
     # Trading Configuration
-    SYMBOL = os.getenv('SYMBOL', 'XAUUSD')
+    SYMBOL = os.getenv('SYMBOL', 'XAUUSDm')
     ENABLE_AUTO_TRADING = os.getenv('ENABLE_AUTO_TRADING', 'false').lower() == 'true'
     RISK_PERCENTAGE = float(os.getenv('RISK_PERCENTAGE', '1.0'))
     FVG_STRONG_THRESHOLD = int(os.getenv('FVG_STRONG_THRESHOLD', '60'))

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { SubheadingText, BodyText } from './StyledText';
 import { useTheme } from '@/contexts/ThemeContext';
 import Layout from '@/constants/Layout';
@@ -20,16 +20,17 @@ export type TradeType = {
   stopLoss?: number;
   takeProfit?: number;
   lotSize?: number;
-  accountName?: string; // Account name for display
+  accountName?: string;
 };
 
 type TradeCardProps = {
   trade: TradeType;
   onPress?: (id: string) => void;
-  showAccountName?: boolean; // Show account name when viewing all accounts
+  showAccountName?: boolean;
+  onCloseTrade?: (ticket: number) => void;
 };
 
-export default function TradeCard({ trade, onPress, showAccountName = false }: TradeCardProps) {
+export default function TradeCard({ trade, onPress, showAccountName = false, onCloseTrade }: TradeCardProps) {
   const { colors } = useTheme();
   const [isExpanded, setIsExpanded] = React.useState(false);
   const isProfit = trade.profit > 0;
@@ -41,7 +42,23 @@ export default function TradeCard({ trade, onPress, showAccountName = false }: T
     onPress && onPress(trade.id);
   };
 
-  // Dynamic styles
+  const handleCloseTrade = () => {
+    if (!trade.ticket || !onCloseTrade) return;
+
+    Alert.alert(
+      'Close Trade',
+      `Are you sure you want to close this ${trade.direction} ${trade.symbol} trade?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Close',
+          style: 'destructive',
+          onPress: () => onCloseTrade(trade.ticket!)
+        }
+      ]
+    );
+  };
+
   const themeStyles = {
     container: { backgroundColor: colors.card },
     symbol: { color: colors.text },
@@ -54,7 +71,6 @@ export default function TradeCard({ trade, onPress, showAccountName = false }: T
 
   return (
     <View>
-      {/* Account Name Badge - shown when viewing all accounts */}
       {showAccountName && trade.accountName && (
         <View style={[styles.accountNameBadge, themeStyles.accountNameBadge]}>
           <BodyText style={[styles.accountNameText, themeStyles.accountNameText]}>
@@ -107,7 +123,6 @@ export default function TradeCard({ trade, onPress, showAccountName = false }: T
           </View>
         </View>
 
-        {/* Expandable Section */}
         {isExpanded && (
           <View style={[styles.expandedSection, themeStyles.expandedSection]}>
             <View style={styles.expandedRow}>
@@ -128,6 +143,15 @@ export default function TradeCard({ trade, onPress, showAccountName = false }: T
                 {trade.lotSize?.toFixed(2) || '-'}
               </BodyText>
             </View>
+
+            {trade.status === 'OPEN' && onCloseTrade && trade.ticket && (
+              <TouchableOpacity
+                style={[styles.closeButton, { backgroundColor: colors.negative }]}
+                onPress={handleCloseTrade}
+              >
+                <BodyText style={styles.closeButtonText}>✕ Close Trade</BodyText>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </TouchableOpacity>
@@ -223,6 +247,18 @@ const styles = StyleSheet.create({
   },
   expandedValue: {
     fontSize: 14,
+    fontWeight: '600',
+  },
+  closeButton: {
+    marginTop: Layout.spacing.md,
+    paddingVertical: Layout.spacing.sm,
+    paddingHorizontal: Layout.spacing.md,
+    borderRadius: Layout.borderRadius.md,
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: '600',
   },
 });

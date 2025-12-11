@@ -119,19 +119,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const data = await authService.register(name, email, password, otp, additionalData);
       console.log('📦 Signup response data:', JSON.stringify(data, null, 2));
+
+      // Ensure we map ALL fields returned from backend
       const appUser: User = {
         id: data.user.UserID.toString(),
         name: data.user.UserName,
         email: data.user.UserEmail,
         token: data.access_token,
-        phoneNumber: data.user.PhoneNumber,
-        address: data.user.Address,
-        idCardNumber: data.user.UserIDCardrNumber ? data.user.UserIDCardrNumber.toString() : undefined,
-        dateOfBirth: data.user.DateOfBirth
+        phoneNumber: data.user.PhoneNumber ?? additionalData?.phoneNumber,
+        address: data.user.Address ?? additionalData?.address,
+        idCardNumber: data.user.UserIDCardrNumber ? data.user.UserIDCardrNumber.toString() : additionalData?.idCardNumber,
+        dateOfBirth: data.user.DateOfBirth ?? additionalData?.dateOfBirth
       };
+
       console.log('👤 Created signup appUser:', JSON.stringify(appUser, null, 2));
       await AsyncStorage.setItem('user', JSON.stringify(appUser));
+
+      // Update state directly
       setUser(appUser);
+
       console.log('✅ User data saved to AsyncStorage and AuthContext');
 
       if (!isProfileComplete(appUser)) {
