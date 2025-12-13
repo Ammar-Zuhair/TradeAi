@@ -36,8 +36,8 @@ class MT5Service:
             Tuple of (success, account_info_dict, error_message)
         """
         try:
-            # Initialize MT5
-            if not mt5.initialize():
+            # Initialize MT5 with specific account
+            if not mt5.initialize(login=login, password=password, server=server):
                 error = f"MT5 initialization failed: {mt5.last_error()}"
                 logger.error(error)
                 return False, None, error

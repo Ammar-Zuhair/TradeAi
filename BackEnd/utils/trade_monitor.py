@@ -29,7 +29,7 @@ class TradeMonitor:
         db: Session = SessionLocal()
         try:
             # Get all open trades
-            open_trades = db.query(Trade).filter(Trade.TradeStatus == 'Open').all()
+            open_trades = db.query(Trade).filter(Trade.TradeStatus == 1).all()  # 1 = Open
             
             if not open_trades:
                 return
@@ -101,7 +101,8 @@ class TradeMonitor:
                     
                     if history:
                         # Update trade in database
-                        trade.TradeStatus = 'Closed'
+                        profit = history.get('profit', 0.0)
+                        trade.TradeStatus = 2 if profit >= 0 else 3  # 2 Win, 3 Loss
                         trade.TradeCloseTime = datetime.now()
                         trade.TradeClosePrice = history.get('close_price', trade.TradeOpenPrice)
                         trade.TradeProfitLose = history.get('profit', 0.0)

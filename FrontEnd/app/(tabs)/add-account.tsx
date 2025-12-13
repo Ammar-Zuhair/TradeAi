@@ -11,6 +11,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   BackHandler,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -22,10 +24,13 @@ import { useTheme } from '@/contexts/ThemeContext';
 import Layout from '@/constants/Layout';
 import { HeadingText, BodyText } from '@/components/StyledText';
 import Input from '@/components/Input';
+import { brokerService } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 import Button from '@/components/Button';
 
 export default function AddAccountScreen() {
   const { addAccount, error, clearError } = useAccounts();
+  const { user } = useAuth();
   const { colors } = useTheme();
 
   const [formData, setFormData] = useState({
@@ -33,9 +38,20 @@ export default function AddAccountScreen() {
     loginNumber: '',
     password: '',
     server: '',
+    serverId: undefined as number | undefined,
     riskPercentage: '1.00',
     strategy: 'All' as 'All' | 'FVG + Trend' | 'Voting',
   });
+
+  // Broker & Server Selection State
+  const [brokers, setBrokers] = useState<any[]>([]);
+  const [servers, setServers] = useState<any[]>([]);
+  const [selectedBroker, setSelectedBroker] = useState<{ id: number; name: string } | null>(null);
+
+  const [isBrokerModalOpen, setIsBrokerModalOpen] = useState(false);
+  const [isServerModalOpen, setIsServerModalOpen] = useState(false);
+  const [brokerSearch, setBrokerSearch] = useState('');
+  const [isSearchingBrokers, setIsSearchingBrokers] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
 
@@ -68,6 +84,50 @@ export default function AddAccountScreen() {
     return () => backHandler.remove();
   }, []);
 
+  // Search Brokers Effect
+  useEffect(() => {
+    const searchBrokers = async () => {
+      if (!user?.token) return;
+      setIsSearchingBrokers(true);
+      try {
+        const results = await brokerService.searchBrokers(user.token, brokerSearch);
+        setBrokers(results);
+      } catch (err) {
+        console.log('Error searching brokers:', err);
+      } finally {
+        setIsSearchingBrokers(false);
+      }
+    };
+
+    const debounce = setTimeout(() => {
+      searchBrokers();
+    }, 500);
+
+    return () => clearTimeout(debounce);
+  }, [brokerSearch, user?.token]);
+
+  const handleSelectBroker = async (broker: any) => {
+    setSelectedBroker({ id: broker.broker_id, name: broker.broker_name });
+    setIsBrokerModalOpen(false);
+    setFormData(prev => ({ ...prev, server: '', serverId: undefined })); // Reset server
+
+    // Fetch Servers for this broker
+    if (user?.token) {
+      try {
+        const serverResults = await brokerService.getBrokerServers(user.token, broker.broker_id);
+        setServers(serverResults);
+      } catch (err) {
+        console.log('Error fetching servers:', err);
+        Alert.alert('Error', 'Failed to fetch servers for this broker');
+      }
+    }
+  };
+
+  const handleSelectServer = (server: any) => {
+    setFormData(prev => ({ ...prev, server: server.server_name, serverId: server.server_id }));
+    setIsServerModalOpen(false);
+  };
+
   const handleAddAccount = async () => {
     if (!formData.accountName || !formData.loginNumber || !formData.password || !formData.server) {
       Alert.alert('Error', 'Please fill in all required fields');
@@ -87,6 +147,7 @@ export default function AddAccountScreen() {
         loginNumber: formData.loginNumber,
         password: formData.password,
         server: formData.server,
+        serverId: formData.serverId,
         riskPercentage: riskValue,
         strategy: formData.strategy,
       });
@@ -98,7 +159,23 @@ export default function AddAccountScreen() {
           `Balance: $${result.mt5Info?.balance || 0}\n` +
           `Leverage: 1:${result.mt5Info?.leverage || 0}\n` +
           `Server: ${result.mt5Info?.server || formData.server}`,
-          [{ text: 'OK', onPress: () => router.back() }]
+          [{ 
+            text: 'OK', 
+            onPress: () => {
+              // Reset form
+              setFormData({
+                accountName: '',
+                loginNumber: '',
+                password: '',
+                server: '',
+                serverId: undefined,
+                riskPercentage: '1.00',
+                strategy: 'All',
+              });
+              setSelectedBroker(null);
+              // router.back() // User requested to stay on screen to add more
+            } 
+          }]
         );
       } else {
         Alert.alert('Verification Failed', result.message);
@@ -132,7 +209,81 @@ export default function AddAccountScreen() {
     },
     typeText: { color: colors.placeholder },
     typeTextActive: { color: colors.primary },
+    modalOverlay: {
+      backgroundColor: 'rgba(0,0,0,0.5)',
+    },
+    modalContent: {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+    },
+    listItem: {
+      borderBottomColor: colors.border,
+    },
+    listText: {
+      color: colors.text,
+    }
   };
+
+  const renderSelectionModal = (
+    visible: boolean,
+    onClose: () => void,
+    title: string,
+    isBroker: boolean
+  ) => (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <View style={[styles.modalOverlay, themeStyles.modalOverlay]}>
+        <View style={[styles.modalContent, themeStyles.modalContent]}>
+          <View style={styles.modalHeader}>
+            <HeadingText style={[styles.modalTitle, themeStyles.title]}>{title}</HeadingText>
+            <TouchableOpacity onPress={onClose}>
+              <BodyText style={styles.closeButton}>Close</BodyText>
+            </TouchableOpacity>
+          </View>
+
+          {isBroker && (
+            <View style={[styles.inputContainer, themeStyles.inputContainer, { marginBottom: 10 }]}>
+              <Globe size={20} color={themeStyles.icon} style={styles.inputIcon} />
+              <TextInput
+                style={[styles.input, themeStyles.input]}
+                value={brokerSearch}
+                onChangeText={setBrokerSearch}
+                placeholder="Search broker..."
+                placeholderTextColor={themeStyles.placeholder}
+                autoFocus
+              />
+            </View>
+          )}
+
+          <FlatList
+            data={isBroker ? brokers : servers}
+            keyExtractor={(item) => (isBroker ? item.broker_id.toString() : item.server_id.toString())}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[styles.listItem, themeStyles.listItem]}
+                onPress={() => isBroker ? handleSelectBroker(item) : handleSelectServer(item)}
+              >
+                <BodyText style={[styles.listText, themeStyles.listText]}>
+                  {isBroker ? item.broker_name : item.server_name}
+                </BodyText>
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={
+              <BodyText style={{ textAlign: 'center', marginTop: 20, color: themeStyles.placeholder }}>
+                {isBroker
+                  ? (isSearchingBrokers ? 'Searching...' : 'No brokers found')
+                  : 'No servers available'}
+              </BodyText>
+            }
+          />
+        </View>
+      </View>
+    </Modal>
+  );
 
   return (
     <SafeAreaView style={[styles.container, themeStyles.container]} edges={['top']}>
@@ -196,19 +347,48 @@ export default function AddAccountScreen() {
               </View>
             </View>
 
-            {/* Server */}
+            {/* Broker Selection */}
+            <View style={styles.inputGroup}>
+              <BodyText style={[styles.label, themeStyles.label]}>Platform / Broker *</BodyText>
+              <TouchableOpacity
+                style={[styles.inputContainer, themeStyles.inputContainer]}
+                onPress={() => setIsBrokerModalOpen(true)}
+              >
+                <Globe size={20} color={themeStyles.icon} style={styles.inputIcon} />
+                <BodyText style={[
+                  styles.inputText,
+                  !selectedBroker && { color: themeStyles.placeholder },
+                  selectedBroker && { color: themeStyles.input.color }
+                ]}>
+                  {selectedBroker ? selectedBroker.name : 'Select Broker'}
+                </BodyText>
+              </TouchableOpacity>
+            </View>
+
+            {/* Server Selection */}
             <View style={styles.inputGroup}>
               <BodyText style={[styles.label, themeStyles.label]}>Server *</BodyText>
-              <View style={[styles.inputContainer, themeStyles.inputContainer]}>
+              <TouchableOpacity
+                style={[
+                  styles.inputContainer,
+                  themeStyles.inputContainer,
+                  !selectedBroker && { opacity: 0.7 }
+                ]}
+                onPress={() => {
+                  if (selectedBroker) setIsServerModalOpen(true);
+                  else Alert.alert('Notice', 'Please select a broker first');
+                }}
+                disabled={!selectedBroker}
+              >
                 <Server size={20} color={themeStyles.icon} style={styles.inputIcon} />
-                <TextInput
-                  style={[styles.input, themeStyles.input]}
-                  value={formData.server}
-                  onChangeText={(text) => setFormData({ ...formData, server: text })}
-                  placeholder="e.g. MetaQuotes-Demo"
-                  placeholderTextColor={themeStyles.placeholder}
-                />
-              </View>
+                <BodyText style={[
+                  styles.inputText,
+                  !formData.server && { color: themeStyles.placeholder },
+                  formData.server && { color: themeStyles.input.color }
+                ]}>
+                  {formData.server || 'Select Server'}
+                </BodyText>
+              </TouchableOpacity>
             </View>
 
             {/* Risk Percentage */}
@@ -274,7 +454,11 @@ export default function AddAccountScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+
+      {/* Modals */}
+      {renderSelectionModal(isBrokerModalOpen, () => setIsBrokerModalOpen(false), 'Select Broker', true)}
+      {renderSelectionModal(isServerModalOpen, () => setIsServerModalOpen(false), 'Select Server', false)}
+    </SafeAreaView >
   );
 }
 
@@ -370,5 +554,47 @@ const styles = StyleSheet.create({
   },
   createButton: {
     marginTop: Layout.spacing.md,
+  },
+  inputText: {
+    flex: 1,
+    fontSize: 16,
+    fontFamily: 'Inter-Regular',
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    height: '70%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: Layout.spacing.lg,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Layout.spacing.md,
+  },
+  modalTitle: {
+    fontSize: 20,
+  },
+  closeButton: {
+    fontSize: 16,
+    color: '#FF4444',
+  },
+  listItem: {
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+  },
+  listText: {
+    fontSize: 16,
   },
 });

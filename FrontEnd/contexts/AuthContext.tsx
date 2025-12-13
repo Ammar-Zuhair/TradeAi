@@ -4,6 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 // import { LoginManager, AccessToken } from 'react-native-fbsdk-next';
 import { authService } from '@/services/api';
+import { DBUser } from '@/types/schema';
+import { getUserStatusLabel } from '@/utils/formatting';
 
 
 type User = {
@@ -15,6 +17,9 @@ type User = {
   address?: string;
   idCardNumber?: string;
   dateOfBirth?: string;
+  status?: boolean;
+  statusLabel?: string;
+  notificationsEnabled?: boolean;
 };
 
 type AuthContextType = {
@@ -88,13 +93,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('📦 Login response data:', JSON.stringify(data, null, 2));
       const appUser: User = {
         id: data.user.UserID.toString(),
-        name: data.user.UserName,
-        email: data.user.UserEmail,
+        name: data.user.UserName || data.user.UserIDCardName, // ✅ Fix: Handle UserName from Login/Register
+        email: data.user.UserEmail || data.user.Email, // ✅ Fix: Handle UserEmail from Login/Register
         token: data.access_token,
         phoneNumber: data.user.PhoneNumber,
         address: data.user.Address,
-        idCardNumber: data.user.UserIDCardrNumber ? data.user.UserIDCardrNumber.toString() : undefined,
-        dateOfBirth: data.user.DateOfBirth
+        idCardNumber: data.user.UserIDCardNumber ? data.user.UserIDCardNumber.toString() : undefined, // Backend 'UserIDCardNumber'
+        dateOfBirth: data.user.DateOfBirth,
+        status: data.user.UserStatus,
+        statusLabel: getUserStatusLabel(data.user.UserStatus),
+        notificationsEnabled: data.user.IsNotificationsEnabled
       };
       console.log('👤 Created appUser object:', JSON.stringify(appUser, null, 2));
       await AsyncStorage.setItem('user', JSON.stringify(appUser));
@@ -106,7 +114,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         router.replace('/(tabs)');
       }
     } catch (e: any) {
-      setError(e.response?.data?.detail || e.response?.data?.message || 'Login failed');
+      if (e.response) {
+        // Server responded with a status code (e.g., 400, 401, 500)
+        setError(`Server: ${e.response?.data?.detail || e.response?.data?.message || 'Login failed'}`);
+      } else if (e.request) {
+        // Request made but no response (Network Error)
+        setError('Network Error: Could not connect to server. Check your IP/Wi-Fi.');
+      } else {
+        setError(`Error: ${e.message || 'Login failed'}`);
+      }
       console.error('Login error', e);
     } finally {
       setIsLoading(false);
@@ -123,13 +139,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Ensure we map ALL fields returned from backend
       const appUser: User = {
         id: data.user.UserID.toString(),
-        name: data.user.UserName,
-        email: data.user.UserEmail,
+        name: data.user.UserName || data.user.UserIDCardName, // ✅ Fix: Handle UserName
+        email: data.user.UserEmail || data.user.Email, // ✅ Fix: Handle UserEmail
         token: data.access_token,
         phoneNumber: data.user.PhoneNumber ?? additionalData?.phoneNumber,
         address: data.user.Address ?? additionalData?.address,
-        idCardNumber: data.user.UserIDCardrNumber ? data.user.UserIDCardrNumber.toString() : additionalData?.idCardNumber,
-        dateOfBirth: data.user.DateOfBirth ?? additionalData?.dateOfBirth
+        idCardNumber: data.user.UserIDCardNumber ? data.user.UserIDCardNumber.toString() : additionalData?.idCardNumber,
+        dateOfBirth: data.user.DateOfBirth ?? additionalData?.dateOfBirth,
+        status: data.user.UserStatus,
+        statusLabel: getUserStatusLabel(data.user.UserStatus || true), // specific assumption for new user
+        notificationsEnabled: data.user.IsNotificationsEnabled
       };
 
       console.log('👤 Created signup appUser:', JSON.stringify(appUser, null, 2));

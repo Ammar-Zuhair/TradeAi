@@ -36,17 +36,37 @@ async def create_account(
         )
     
     # Verify required MT5 credentials
-    if not account.AccountLoginNumber or not account.AccountLoginPassword or not account.AccountLoginServer:
+    if not account.AccountLoginNumber or not account.AccountLoginPassword:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MT5 login credentials (number, password, server) are required"
+            detail="MT5 login credentials (number, password) are required"
         )
     
+    if not account.ServerID:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ServerID is required"
+        )
+    
+    # ✅ Get server name and ID
+    from models.broker_server import BrokerServer
+    server = db.query(BrokerServer).filter(BrokerServer.ServerID == account.ServerID).first()
+    
+    if not server:
+         raise HTTPException(
+             status_code=status.HTTP_404_NOT_FOUND,
+             detail=f"Server with ID {account.ServerID} not found"
+         )
+        
+    server_name = server.ServerName
+    
+    server_name = server.ServerName
+            
     # Verify MT5 account and fetch information
     success, mt5_data, error = MT5Service.verify_and_get_account_info(
         login=account.AccountLoginNumber,
         password=account.AccountLoginPassword,
-        server=account.AccountLoginServer
+        server=server_name 
     )
     
     if not success:
@@ -56,20 +76,45 @@ async def create_account(
             account=None,
             mt5_info=None
         )
+        
+    # If verification success and we didn't have a server record, create/find it now
+    # STRICT MODE: Server MUST exist via ServerID beforehand. 
+            
+    # Ensure account.ServerID is set for the DB
+    account.ServerID = server.ServerID
+    server_name = server.ServerName
     
-    # Determine account type from MT5 data
-    account_type = mt5_data.get('trade_mode', 'Unknown')
+    if not success:
+        return MT5VerificationResponse(
+            success=False,
+            message=f"MT5 verification failed: {error}",
+            account=None,
+            mt5_info=None
+        )
+    
+    # ✅ Convert AccountType from MT5 trade_mode to Integer enum
+    # MT5 trade_mode: 0=Disabled, 1=LongOnly, 2=ShortOnly, 3=CloseOnly, 4=Full
+    # We determine Demo/Real from account info
+    account_type_int = 2  # Default to Real
+    
+    # Check if it's a demo account (usually has "demo" in server name or company)
+    server_lower = server_name.lower()
+    company_lower = mt5_data.get('company', '').lower()
+    
+    if 'demo' in server_lower or 'demo' in company_lower or 'trial' in server_lower:
+        account_type_int = 1  # Demo
     
     # Create new account with verified data
     new_account = Account(
         UserID=account.UserID,
-        AccountType=account_type,
-        AccountLoginServer=account.AccountLoginServer,
+        AccountType=account_type_int,  # ✅ Integer: 1=Demo, 2=Real
+        ServerID=account.ServerID,  # ✅ Link to PlatformServers table
         AccountLoginNumber=account.AccountLoginNumber,
         AccountLoginPassword=encrypt(account.AccountLoginPassword),
         AccountBalance=mt5_data.get('balance', 0.00),
         RiskPercentage=account.RiskPercentage if account.RiskPercentage else 1.00,
-        TradingStrategy=account.TradingStrategy if account.TradingStrategy else "All"
+        TradingStrategy=account.TradingStrategy if account.TradingStrategy else "All",
+        AccountName=account.AccountName  # ✅ User-friendly account name
     )
     
     db.add(new_account)
@@ -84,11 +129,12 @@ async def create_account(
         symbols = get_mt5_symbols(
             login=account.AccountLoginNumber,
             password=account.AccountLoginPassword,
-            server=account.AccountLoginServer
+            server=server_name
         )
         
         if symbols:
             # Get automatic mapping suggestions
+            # suggestions is now a list of dicts: [{'account_symbol': '...', 'suggested_trading_pair_id': ...}]
             suggestions = suggest_symbol_mapping(new_account.AccountID, symbols)
             
             if suggestions:
@@ -140,8 +186,30 @@ async def get_all_accounts(
     """Get all accounts for the current user"""
     # STRICT SECURITY: Only return accounts belonging to the authenticated user
     # Do NOT rely on client-provided UserID
-    accounts = db.query(Account).filter(Account.UserID == current_user.UserID).all()
-    return accounts
+    from models.broker_server import BrokerServer
+    from sqlalchemy.orm import joinedload
+    
+    accounts = db.query(Account).options(
+        joinedload(Account.server)
+    ).filter(
+        Account.UserID == current_user.UserID
+    ).all()
+    
+    # Manually populate the ServerName field from the relationship
+    result = []
+    for acc in accounts:
+        # Create a dict from the model
+        acc_dict = {c.name: getattr(acc, c.name) for c in acc.__table__.columns}
+        
+        # Add ServerName if server exists
+        if acc.server:
+            acc_dict['ServerName'] = acc.server.ServerName
+        else:
+            acc_dict['ServerName'] = "Unknown"
+            
+        result.append(acc_dict)
+        
+    return result
 
 
 @router.get("/{account_id}", response_model=AccountResponse)
@@ -151,13 +219,26 @@ async def get_account(
     current_user: User = Depends(get_current_user)
 ):
     """Get account by ID"""
-    account = db.query(Account).filter(Account.AccountID == account_id).first()
+    from sqlalchemy.orm import joinedload
+    
+    account = db.query(Account).options(
+        joinedload(Account.server)
+    ).filter(Account.AccountID == account_id).first()
+    
     if not account:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found"
         )
-    return account
+        
+    # Create response dict
+    acc_dict = {c.name: getattr(account, c.name) for c in account.__table__.columns}
+    if account.server:
+        acc_dict['ServerName'] = account.server.ServerName
+    else:
+        acc_dict['ServerName'] = "Unknown"
+        
+    return acc_dict
 
 
 @router.put("/{account_id}", response_model=AccountResponse)

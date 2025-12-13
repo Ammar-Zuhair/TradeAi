@@ -15,7 +15,7 @@ export type TradeType = {
   profit: number;
   openTime: string;
   closeTime?: string;
-  status: 'OPEN' | 'CLOSED';
+  status: 'OPEN' | 'CLOSED' | 'WIN' | 'LOSS';
   ticket?: number;
   stopLoss?: number;
   takeProfit?: number;

@@ -12,7 +12,8 @@ import { Platform } from 'react-native';
 // 
 // ⚠️ IMPORTANT: This IP may change when you restart your router!
 // For a permanent solution, set a Static IP in your router settings.
-const SERVER_IP = '172.184.114.68';
+// const SERVER_IP = '172.184.114.68';
+const SERVER_IP = '10.189.175.95';
 const SERVER_PORT = '3000';
 // ---------------------------------------------------------------------------
 
@@ -69,15 +70,15 @@ api.interceptors.response.use(
     error => {
         console.log('❌ Request Failed:', error.message);
         if (error.response) {
+            console.log('❌ SERVER ERROR RESPONSE:');
             console.log('   Status:', error.response.status);
-            console.log('   Data:', error.response.data);
+            console.log('   Data:', JSON.stringify(error.response.data));
         } else if (error.request) {
-            console.log('   No response received from server');
-            console.log('   Possible causes:');
-            console.log('   1. Wrong IP address in api.ts');
-            console.log('   2. Phone and Computer not on same Wi-Fi');
-            console.log('   3. Windows Firewall blocking port 3000');
-            console.log('   4. Backend server is not running');
+            console.log('❌ NETWORK ERROR (No Response):');
+            console.log('   The request was made but no response was received.');
+            console.log('   Error Details:', error.message);
+        } else {
+            console.log('❌ REQUEST SETUP ERROR:', error.message);
         }
         return Promise.reject(error);
     }
@@ -172,7 +173,7 @@ export const accountService = {
         AccountName?: string;
         AccountLoginNumber: number;
         AccountLoginPassword: string;
-        AccountLoginServer: string;
+        ServerID?: number; // Added ServerID
         RiskPercentage?: number;
         TradingStrategy?: 'All' | 'FVG + Trend' | 'Voting';
     }) => {
@@ -234,6 +235,27 @@ export const tradeService = {
 
     closeAllTrades: async (token: string, accountId: number) => {
         const response = await api.post(`/trades/close-all/${accountId}`, {}, {
+            headers: {
+                Authorization: `Bearer ${token}`
+            }
+        });
+        return response.data;
+    }
+};
+
+export const brokerService = {
+    searchBrokers: async (token: string, query: string) => {
+        const response = await api.get(`/brokers/`, {
+            params: { search: query },
+            headers: {
+                Authorization: `Bearer ${token}`
+            }
+        });
+        return response.data;
+    },
+
+    getBrokerServers: async (token: string, brokerId: number) => {
+        const response = await api.get(`/brokers/${brokerId}/servers`, {
             headers: {
                 Authorization: `Bearer ${token}`
             }

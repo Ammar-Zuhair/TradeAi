@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, BigInteger
 from sqlalchemy.sql import func
 from database import Base
-from utils.security import hash_password, verify_password
+from security import hash_password, verify_password
 from datetime import datetime
 
 class User(Base):

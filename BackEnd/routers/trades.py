@@ -32,7 +32,7 @@ async def create_trade(
         AccountID=trade.AccountID,
         # TradeTicket removed
         TradeType=trade.TradeType,
-        TradeAsset=trade.TradeAsset,
+        MappingID=trade.MappingID,
         TradeLotsize=trade.TradeLotsize,
         TradeOpenPrice=trade.TradeOpenPrice,
         TradeOpenTime=trade.TradeOpenTime,
@@ -66,13 +66,33 @@ async def get_all_trades(
     current_user: User = Depends(get_current_user)
 ):
     """Get all trades, optionally filter by account ID"""
-    query = db.query(Trade)
+    from models.account_symbol_mapping import AccountSymbolMapping
+    from models.trading_pair import TradingPair
+    from sqlalchemy.orm import joinedload
+    
+    query = db.query(Trade).options(
+        joinedload(Trade.account_symbol_mapping).joinedload(AccountSymbolMapping.trading_pair)
+    )
     
     if account_id is not None:
         query = query.filter(Trade.AccountID == account_id)
     
     trades = query.all()
-    return trades
+    
+    # Manually populate display fields
+    result = []
+    for trade in trades:
+        t_dict = {c.name: getattr(trade, c.name) for c in trade.__table__.columns}
+        
+        # Add Symbol info
+        if trade.account_symbol_mapping:
+            t_dict['AccountSymbol'] = trade.account_symbol_mapping.AccountSymbol
+            if trade.account_symbol_mapping.trading_pair:
+                t_dict['PairName'] = trade.account_symbol_mapping.trading_pair.PairNameForSearch
+        
+        result.append(t_dict)
+        
+    return result
 
 
 @router.get("/{trade_id}", response_model=TradeResponse)
@@ -82,13 +102,28 @@ async def get_trade(
     current_user: User = Depends(get_current_user)
 ):
     """Get trade by ID"""
-    trade = db.query(Trade).filter(Trade.TradeID == trade_id).first()
+    from models.account_symbol_mapping import AccountSymbolMapping
+    from sqlalchemy.orm import joinedload
+    
+    trade = db.query(Trade).options(
+        joinedload(Trade.account_symbol_mapping).joinedload(AccountSymbolMapping.trading_pair)
+    ).filter(Trade.TradeID == trade_id).first()
+    
     if not trade:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Trade not found"
         )
-    return trade
+        
+    # Populate display fields
+    t_dict = {c.name: getattr(trade, c.name) for c in trade.__table__.columns}
+    
+    if trade.account_symbol_mapping:
+        t_dict['AccountSymbol'] = trade.account_symbol_mapping.AccountSymbol
+        if trade.account_symbol_mapping.trading_pair:
+            t_dict['PairName'] = trade.account_symbol_mapping.trading_pair.PairNameForSearch
+            
+    return t_dict
 
 
 @router.put("/{trade_id}", response_model=TradeResponse)
@@ -147,6 +182,15 @@ async def close_single_trade(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found"
         )
+        
+    # ✅ FIX: Get Server Name from ServerID relation
+    from models.broker_server import BrokerServer
+    server = db.query(BrokerServer).filter(BrokerServer.ServerID == account.ServerID).first()
+    if not server:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Broker Server not found for this account"
+        )
     
     try:
         # Initialize MT5
@@ -160,7 +204,7 @@ async def close_single_trade(
         authorized = mt5.login(
             login=account.AccountLoginNumber,
             password=decrypt(account.AccountLoginPassword),
-            server=account.AccountLoginServer
+            server=server.ServerName  # ✅ Use fetched server name
         )
         
         if not authorized:

@@ -18,7 +18,7 @@ class Account(Base):
     AccountName = Column(String(100), nullable=True)  # User-friendly account name
     UserID = Column(Integer, ForeignKey("Users.UserID"), nullable=False)
     AccountType = Column(Integer, nullable=False)  # 1=Demo, 2=Real (AccountTypeEnum)
-    ServerID = Column(Integer, ForeignKey("PlatformServers.ServerID", ondelete="SET NULL"), nullable=True, index=True)  # Server reference
+    ServerID = Column(Integer, ForeignKey("BrokerServers.ServerID", ondelete="SET NULL"), nullable=True, index=True)  # Server reference
     AccountBalance = Column(DECIMAL(12, 2), default=0.00)
     AccountCreationDate = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now())
     AccountLoginNumber = Column(Integer, nullable=True)
@@ -29,4 +29,5 @@ class Account(Base):
 
     # Relationships
     owner = relationship("User", backref="accounts")
-    server = relationship("PlatformServer", backref="accounts")
+    server = relationship("BrokerServer", backref="accounts")
+

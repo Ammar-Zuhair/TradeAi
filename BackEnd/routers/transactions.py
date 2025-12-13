@@ -26,12 +26,14 @@ async def create_transaction(
             detail="Account not found"
         )
     
-    # Create new transaction
+    # ✅ Create new transaction with integer enums
+    # TransactionType: 1=Month, 2=3Months, 3=6Months, 4=Year
+    # TransactionStatus: 1=Completed, 2=Pending, 3=Failed (default=2)
     new_transaction = Transaction(
         AccountID=transaction.AccountID,
-        Type=transaction.Type,
-        Amount=transaction.Amount,
-        Status='Pending'
+        TransactionType=transaction.TransactionType,  # ✅ Integer from schema
+        TransactionAmount=transaction.TransactionAmount,  # ✅ Correct field name
+        TransactionStatus=2  # ✅ Default to Pending
     )
     
     db.add(new_transaction)

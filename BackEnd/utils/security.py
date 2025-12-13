@@ -136,7 +136,7 @@ def store_otp(email: str, otp: str):
         'expiry': expiry,
         'attempts': 0
     }
-    print(f"💾 OTP Stored for {email}: {otp} (Expires: {expiry})")
+    print(f"💾 OTP Stored for {email}: {otp} (Expires: {expiry})", flush=True)
 
 
 def verify_otp(email: str, otp: str) -> dict:

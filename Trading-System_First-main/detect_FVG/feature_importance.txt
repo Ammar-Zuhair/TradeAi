@@ -1,9 +1,9 @@
                feature  importance
-0             fvg_size        2037
+0             fvg_size        2057
 2     FVG_Type_Bullish         285
-6      bias_H1_Bullish         267
-4     session_New York         169
-3       session_London         127
-1  volume_spike_at_fvg         115
+6      bias_H1_Bullish         262
+4     session_New York         147
+1  volume_spike_at_fvg         134
+3       session_London         115
 5        session_Other           0
 7      bias_H1_Neutral           0

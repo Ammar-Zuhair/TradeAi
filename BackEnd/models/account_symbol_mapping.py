@@ -12,8 +12,8 @@ class AccountSymbolMapping(Base):
 
     MappingID = Column(Integer, primary_key=True, index=True, autoincrement=True)
     AccountID = Column(Integer, ForeignKey("Accounts.AccountID", ondelete="CASCADE"), nullable=False, index=True)
-    TradingPairID = Column(Integer, ForeignKey("TradingPairs.PairID", ondelete="CASCADE"), nullable=False, index=True)
-    AccountSymbol = Column(String(50), nullable=False)  # The actual symbol name in the user's MT5/MT4 account
+    PairID = Column(Integer, ForeignKey("TradingPairs.PairID", ondelete="CASCADE"), nullable=False, index=True)
+    AccountSymbol = Column(String(10), nullable=False)  # The actual symbol name in the user's MT5/MT4 account
     
     # Relationships
     account = relationship("Account", backref="symbol_mappings")

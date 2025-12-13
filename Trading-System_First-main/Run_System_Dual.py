@@ -59,21 +59,30 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Pre
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'BackEnd'))
 
 from database import SessionLocal
-from account import Account
-from trade import Trade
-from user import User
-from security import decrypt
+from models.account import Account
+from models.trade import Trade
+from models.user import User
+from utils.security import decrypt
 from sqlalchemy.orm import Session
 
+# ==================== IMPORT ALL MODELS FOR SQLALCHEMY RELATIONSHIPS ====================
+# These imports are required for SQLAlchemy to resolve relationships correctly
+from models.asset_type import AssetType
+from models.broker import Broker
+from models.broker_server import BrokerServer
+from models.trading_pair import TradingPair
+from models.account_symbol_mapping import AccountSymbolMapping
+from models.transaction import Transaction
+
 # ==================== NEW IMPORTS FOR DATABASE INTEGRATION ====================
-from account_helper import (
+from utils.account_helper import (
     get_account_trading_info,
     get_account_symbol,
     save_trade_to_db,
     update_trade_close,
     get_active_accounts
 )
-from enums import TradeTypeEnum
+from models.enums import TradeTypeEnum
 
 # ==================== CONFIG ====================
 SYMBOL = Config.SYMBOL
@@ -516,7 +525,9 @@ class AccountMonitor:
                     our_pair_name=SYMBOL,  # Our standardized name (e.g., 'GOLD')
                     lot_size=lot_size,
                     open_price=result.price,
-                    open_time=datetime.now()
+                    open_time=datetime.now(),
+                    sl=sl,  # ✅ Stop Loss
+                    tp=tp   # ✅ Take Profit
                 )
                 
                 if success:
@@ -692,10 +703,11 @@ class AdvancedStrategyMonitor(AccountMonitor):
                     time.sleep(60)
                     continue
 
-                # Execute the logic step within the strict context
+                # ✅ Execute logic every 15 minutes (aligned with DataUpdater)
                 self.mt5_context.execute(self.credentials, logic_step)
                 
-                time.sleep(REALTIME_CHECK_SECONDS)
+                # ✅ Sleep for 15 minutes (900 seconds)
+                time.sleep(900)  # 15 minutes instead of REALTIME_CHECK_SECONDS
         except KeyboardInterrupt:
             self.logger.info("\n⚠️ Stopped by user")
         except Exception as e:
@@ -764,8 +776,11 @@ class SimpleStrategyMonitor(AccountMonitor):
                     time.sleep(60)
                     continue
                     
+                # ✅ Execute logic every 15 minutes (aligned with DataUpdater)
                 self.mt5_context.execute(self.credentials, logic_step)
-                time.sleep(REALTIME_CHECK_SECONDS)
+                
+                # ✅ Sleep for 15 minutes (900 seconds)
+                time.sleep(900)  # 15 minutes instead of REALTIME_CHECK_SECONDS
         except KeyboardInterrupt:
             self.logger.info("\n⚠️ Stopped by user")
         except Exception as e:
@@ -1091,18 +1106,23 @@ class VotingStrategyMonitor(AccountMonitor):
 
 # ==================== DATA UPDATER ====================
 class DataUpdater:
-    def __init__(self, shared_state, mt5_context, credentials):
+    def __init__(self, shared_state, mt5_context, credentials, symbol="GOLD", timeframe="M15"):
         self.shared_state = shared_state
         self.mt5_context = mt5_context
         self.credentials = credentials
+        self.symbol = symbol # OurPairName (e.g. GOLD)
+        self.timeframe = timeframe
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         self.fvg_dir = os.path.join(self.script_dir, 'detect_FVG')
-        self.fvg_csv_path = os.path.join(self.fvg_dir, 'fvg_analysis_XAUUSD_M15_4H.csv')
         
-        self.logger = logging.getLogger('DataUpdater')
+        # Dynamic filename based on symbol
+        safe_symbol = symbol.replace("/", "")
+        self.fvg_csv_path = os.path.join(self.fvg_dir, f'fvg_analysis_{safe_symbol}_{timeframe}_4H.csv')
+        
+        self.logger = logging.getLogger(f'DataUpdater_{symbol}')
         self.logger.setLevel(logging.INFO)
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter('[DATA] %(asctime)s - %(message)s'))
+        handler.setFormatter(logging.Formatter(f'[DATA-{symbol}] %(asctime)s - %(message)s'))
         self.logger.addHandler(handler)
         
         self.model_path = os.path.join(self.fvg_dir, 'fvg_strong_classifier.joblib')
@@ -1275,7 +1295,7 @@ class TrailingStopManager:
         """Check all open positions and modify SL to breakeven at 1:1 ratio"""
         try:
             db: Session = SessionLocal()
-            open_trades = db.query(Trade).filter(Trade.TradeStatus == 'Open').all()
+            open_trades = db.query(Trade).filter(Trade.TradeStatus == 1).all()  # 1 = Open
             
             if not open_trades:
                 db.close()
@@ -1293,10 +1313,16 @@ class TrailingStopManager:
                 if not account:
                     continue
                     
+                # ✅ Get server name via ServerID
+                server = db.query(BrokerServer).filter(BrokerServer.ServerID == account.ServerID).first()
+                if not server:
+                    self.logger.warning(f"❌ Server not found for account {account.AccountLoginNumber}")
+                    continue
+                    
                 creds = {
                     "login": account.AccountLoginNumber,
                     "password": decrypt(account.AccountLoginPassword),
-                    "server": account.AccountLoginServer
+                    "server": server.ServerName
                 }
                 
                 # Execute check in MT5 context
@@ -1414,7 +1440,7 @@ class TradeMonitor:
         """Check all open trades in DB and update status"""
         try:
             db: Session = SessionLocal()
-            open_trades = db.query(Trade).filter(Trade.TradeStatus == 'Open').all()
+            open_trades = db.query(Trade).filter(Trade.TradeStatus == 1).all()  # 1 = Open
             
             if not open_trades:
                 db.close()
@@ -1432,10 +1458,16 @@ class TradeMonitor:
                 if not account:
                     continue
                     
+                # ✅ Get server name via ServerID
+                server = db.query(BrokerServer).filter(BrokerServer.ServerID == account.ServerID).first()
+                if not server:
+                    self.logger.warning(f"❌ Server not found for account {account.AccountLoginNumber}")
+                    continue
+                    
                 creds = {
                     "login": account.AccountLoginNumber,
                     "password": decrypt(account.AccountLoginPassword),
-                    "server": account.AccountLoginServer
+                    "server": server.ServerName
                 }
                 
                 # Execute check in MT5 context
@@ -1474,7 +1506,7 @@ class TradeMonitor:
                         # Find exit time and price (last deal)
                         last_deal = deals[-1]
                         
-                        trade.TradeStatus = 'Winning' if total_profit >= 0 else 'Losing'
+                        trade.TradeStatus = 2 if total_profit >= 0 else 3  # 2=Winning, 3=Losing
                         trade.TradeProfitLose = total_profit
                         trade.TradeClosePrice = last_deal.price
                         trade.TradeCloseTime = datetime.fromtimestamp(last_deal.time)
@@ -1497,12 +1529,22 @@ class TradeMonitor:
                                         account_name = account.AccountName or f"Account {account.AccountLoginNumber}"
                                         profit_emoji = "📈" if trade.TradeProfitLose >= 0 else "📉"
                                         profit_text = f"+${trade.TradeProfitLose:.2f}" if trade.TradeProfitLose >= 0 else f"-${abs(trade.TradeProfitLose):.2f}"
-                                        action_ar = "شراء" if trade.TradeType == "BUY" else "بيع"
+                                        
+                                        # ✅ Fix: Use TradeTypeEnum for comparison
+                                        action_ar = "شراء" if trade.TradeType == TradeTypeEnum.BUY else "بيع"
+                                        action_en = "BUY" if trade.TradeType == TradeTypeEnum.BUY else "SELL"
                                         result_ar = "ربح" if trade.TradeProfitLose >= 0 else "خسارة"
+                                        
+                                        # ✅ Fix: Fetch symbol via MappingID
+                                        symbol = "Unknown"
+                                        if trade.MappingID:
+                                            mapping = db.query(AccountSymbolMapping).filter(AccountSymbolMapping.MappingID == trade.MappingID).first()
+                                            if mapping:
+                                                symbol = mapping.AccountSymbol
                                         send_push_notification(
                                             token=user.PushToken,
                                             title=f"إغلاق صفقة {action_ar} {profit_emoji}",
-                                            body=f"{trade.TradeType} {trade.TradeAsset}\n{result_ar}: {profit_text}\nالحساب: {account_name}",
+                                            body=f"{action_en} {symbol}\n{result_ar}: {profit_text}\nالحساب: {account_name}",
                                             data={"trade_id": trade.TradeID, "profit": str(trade.TradeProfitLose), "account_name": account_name}
                                         )
                                 except Exception as e:
@@ -1514,7 +1556,7 @@ class TradeMonitor:
                     else:
                         # Could not find in history? Maybe just closed?
                         # Mark as Closed/Unknown or assume manual close
-                        trade.TradeStatus = 'Closed'
+                        trade.TradeStatus = 3  # Closed (Unknown/Failed)
                         self.logger.warning(f"⚠️ Trade {ticket} not found in history")
                 
                 db.commit()
@@ -1556,25 +1598,57 @@ def main():
 
         print(f"📋 Found {len(accounts)} accounts in database.")
         
-        # 1. Start Data Updater (Always runs, needs ANY valid account to fetch data)
-        # We use the first available account from DB just for data fetching context
-        first_acc = accounts[0]
-        try:
-            data_creds = {
-                "login": first_acc.AccountLoginNumber,
-                "password": decrypt(first_acc.AccountLoginPassword),
-                "server": first_acc.AccountLoginServer
-            }
+        # 1. Start market analysis (Data Updaters) - ONE PER PAIR
+        from models.market_analysis_config import MarketAnalysisConfig
+        
+        active_configs = db.query(MarketAnalysisConfig).filter(MarketAnalysisConfig.IsActive == True).all()
+        
+        if not active_configs:
+            print("⚠️ No active market analysis configurations found!")
+        
+        # ✅ Group by OurPairName to avoid duplicate analysis
+        pairs_processed = set()
+        
+        for config in active_configs:
+            pair_name = config.OurPairName
             
-            data_updater = DataUpdater(shared_state, mt5_context, data_creds)
-            t_data = threading.Thread(target=data_updater.run, daemon=True)
-            t_data.start()
-            threads.append(t_data)
-            print("✅ Data Updater started")
-        except Exception as e:
-            print(f"❌ Failed to start Data Updater: {e}")
-            db.close()
-            return
+            # Skip if we already created a DataUpdater for this pair
+            if pair_name in pairs_processed:
+                continue
+            
+            try:
+                # Get source account for this pair
+                source_account = db.query(Account).filter(Account.AccountID == config.AccountID).first()
+                if not source_account:
+                    print(f"❌ Source account {config.AccountID} not found for pair {pair_name}")
+                    continue
+                    
+                # Fetch server name via ServerID
+                server = db.query(BrokerServer).filter(BrokerServer.ServerID == source_account.ServerID).first()
+                if not server:
+                    print(f"❌ Server not found for account {source_account.AccountLoginNumber}")
+                    continue
+                    
+                data_creds = {
+                    "login": source_account.AccountLoginNumber,
+                    "password": decrypt(source_account.AccountLoginPassword),
+                    "server": server.ServerName
+                }
+                
+                # ✅ Create ONE DataUpdater per pair (shared by all strategies)
+                data_updater = DataUpdater(shared_state, mt5_context, data_creds, pair_name, config.Timeframe)
+                t_data = threading.Thread(target=data_updater.run, daemon=True)
+                t_data.start()
+                threads.append(t_data)
+                
+                pairs_processed.add(pair_name)
+                print(f"✅ Data Updater started for {pair_name} (Timeframe: {config.Timeframe}) using Account {source_account.AccountLoginNumber}")
+                
+            except Exception as e:
+                print(f"❌ Failed to start Data Updater for {pair_name}: {e}")
+
+        print(f"\n📊 Total pairs being analyzed: {len(pairs_processed)}")
+
 
         # 2. Start Trailing Stop Manager
         try:
@@ -1599,10 +1673,16 @@ def main():
         # 4. Start Strategy Monitors based on Account Type
         for acc in accounts:
             try:
+                # Fetch server name via ServerID
+                server = db.query(BrokerServer).filter(BrokerServer.ServerID == acc.ServerID).first()
+                if not server:
+                    print(f"❌ Server not found for account {acc.AccountLoginNumber}")
+                    continue
+                    
                 creds = {
                     "login": acc.AccountLoginNumber,
                     "password": decrypt(acc.AccountLoginPassword),
-                    "server": acc.AccountLoginServer
+                    "server": server.ServerName
                 }
                 
                 strategy = acc.TradingStrategy

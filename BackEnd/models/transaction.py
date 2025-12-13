@@ -12,6 +12,8 @@ class Transaction(Base):
     TransactionType = Column(Integer, nullable=False)  # 1=Month, 2=3Months, 3=6Months, 4=Year (TransactionTypeEnum)
     TransactionAmount = Column(DECIMAL(12, 2), nullable=False)
     TransactionDate = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now())
+    TransactionEnd = Column(DateTime(timezone=True), nullable=True)
+    
     TransactionStatus = Column(Integer, default=2)  # 1=Completed, 2=Pending, 3=Failed (TransactionStatusEnum)
 
     # Relationship

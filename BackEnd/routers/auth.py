@@ -50,7 +50,10 @@ async def send_otp(request: OTPRequest, db: Session = Depends(get_db)):
     if not email_sent:
         msg = "OTP generated (Email failed - Check logs)"
     
-    print(f"OTP for {request.email}: {otp}")
+    print(f"\n{'='*50}", flush=True)
+    print(f"🔑 GENERATED OTP: {otp}", flush=True)
+    print(f"📧 For Email: {request.email}", flush=True)
+    print(f"{'='*50}\n", flush=True)
     
     return {
         "message": msg,
@@ -105,11 +108,11 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     
     # Create new user
     new_user = User(
-        UserIDcardrName=request.name,
+        UserIDCardName=request.name,
         Email=request.email,
         Password=hash_password(request.password),
         UserStatus=True, # Active by default
-        UserIDCardrNumber=int(request.idCardNumber) if request.idCardNumber else None,
+        UserIDCardNumber=int(request.idCardNumber) if request.idCardNumber else None,
         PhoneNumber=request.phoneNumber,
         Address=request.address,
         DateOfBirth=request.dateOfBirth
@@ -127,13 +130,13 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         "token_type": "bearer",
         "user": {
             "UserID": new_user.UserID,
-            "UserName": new_user.UserIDcardrName, # Mapping for frontend compatibility if needed
+            "UserName": new_user.UserIDCardName, # Mapping for frontend compatibility if needed
             "UserEmail": new_user.Email,
             "UserStatus": new_user.UserStatus,
             "PhoneNumber": new_user.PhoneNumber,
             "Address": new_user.Address,
             "DateOfBirth": new_user.DateOfBirth,
-            "UserIDCardrNumber": new_user.UserIDCardrNumber
+            "UserIDCardNumber": new_user.UserIDCardNumber
         }
     }
 
@@ -141,43 +144,43 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse)
 async def login(request: LoginRequest, db: Session = Depends(get_db)):
     """Login with email and password"""
-    print(f"\n{'='*50}")
-    print(f"🔐 LOGIN REQUEST RECEIVED")
-    print(f"{'='*50}")
-    print(f"📧 Email: {request.email}")
-    print(f"🔍 Searching for user in database...")
+    print(f"\n{'='*50}", flush=True)
+    print(f"🔐 LOGIN REQUEST RECEIVED", flush=True)
+    print(f"{'='*50}", flush=True)
+    print(f"📧 Email: {request.email}", flush=True)
+    print(f"🔍 Searching for user in database...", flush=True)
     
     try:
         # Find user
         user = db.query(User).filter(User.Email == request.email).first()
         
         if not user:
-            print(f"❌ User not found: {request.email}")
-            print(f"{'='*50}\n")
+            print(f"❌ User not found: {request.email}", flush=True)
+            print(f"{'='*50}\n", flush=True)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
             )
         
-        print(f"✅ User found: {user.UserIDcardrName} (ID: {user.UserID})")
-        print(f"🔑 Verifying password...")
+        print(f"✅ User found: {user.UserIDCardName} (ID: {user.UserID})", flush=True)
+        print(f"🔑 Verifying password...", flush=True)
         
         # Verify password
         if not verify_password(request.password, user.Password):
-            print(f"❌ Password verification failed")
-            print(f"{'='*50}\n")
+            print(f"❌ Password verification failed", flush=True)
+            print(f"{'='*50}\n", flush=True)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
             )
         
-        print(f"✅ Password verified successfully")
-        print(f"📊 User Status: {user.UserStatus}")
+        print(f"✅ Password verified successfully", flush=True)
+        print(f"📊 User Status: {user.UserStatus}", flush=True)
         
         # Check user status
         if not user.UserStatus:
-            print(f"❌ Account is not active: {user.UserStatus}")
-            print(f"{'='*50}\n")
+            print(f"❌ Account is not active: {user.UserStatus}", flush=True)
+            print(f"{'='*50}\n", flush=True)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is not active"
@@ -193,18 +196,18 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
             "token_type": "bearer",
             "user": {
                 "UserID": user.UserID,
-                "UserName": user.UserIDcardrName,
+                "UserName": user.UserIDCardName,
                 "UserEmail": user.Email,
                 "UserStatus": user.UserStatus,
                 "PhoneNumber": user.PhoneNumber,
                 "Address": user.Address,
                 "DateOfBirth": user.DateOfBirth,
-                "UserIDCardrNumber": user.UserIDCardrNumber
+                "UserIDCardNumber": user.UserIDCardNumber
             }
         }
         
         print(f"✅ Login successful!")
-        print(f"👤 User: {user.UserIDcardrName}")
+        print(f"👤 User: {user.UserIDCardName}")
         print(f"📧 Email: {user.Email}")
         print(f"🆔 UserID: {user.UserID}")
         print(f"🎫 Token generated (length: {len(access_token)} chars)")
@@ -298,7 +301,7 @@ async def google_login(request: GoogleAuthRequest, db: Session = Depends(get_db)
         if not user:
             # Create new user
             user = User(
-                UserIDcardrName=name,
+                UserIDCardName=name,
                 Email=email,
                 Password=hash_password(generate_otp()),  # Random password
                 UserStatus=True
@@ -315,7 +318,7 @@ async def google_login(request: GoogleAuthRequest, db: Session = Depends(get_db)
             "token_type": "bearer",
             "user": {
                 "UserID": user.UserID,
-                "UserName": user.UserIDcardrName,
+                "UserName": user.UserIDCardName,
                 "UserEmail": user.Email,
                 "UserStatus": user.UserStatus
             }
@@ -360,7 +363,7 @@ async def facebook_login(request: FacebookAuthRequest, db: Session = Depends(get
             if not user:
                 # Create new user
                 user = User(
-                    UserIDcardrName=name,
+                    UserIDCardName=name,
                     Email=email,
                     Password=hash_password(generate_otp()),  # Random password
                     UserStatus=True
@@ -377,7 +380,7 @@ async def facebook_login(request: FacebookAuthRequest, db: Session = Depends(get
                 "token_type": "bearer",
                 "user": {
                     "UserID": user.UserID,
-                    "UserName": user.UserIDcardrName,
+                    "UserName": user.UserIDCardName,
                     "UserEmail": user.Email,
                     "UserStatus": user.UserStatus
                 }
@@ -399,11 +402,11 @@ async def update_profile(
     """Update user profile information"""
     try:
         # Update fields if provided
-        if user_update.UserIDcardrName is not None:
-            current_user.UserIDcardrName = user_update.UserIDcardrName
+        if user_update.UserIDCardName is not None:
+            current_user.UserIDCardName = user_update.UserIDCardName
         
-        if user_update.UserIDCardrNumber is not None:
-            current_user.UserIDCardrNumber = user_update.UserIDCardrNumber
+        if user_update.UserIDCardNumber is not None:
+            current_user.UserIDCardNumber = user_update.UserIDCardNumber
         
         if user_update.PhoneNumber is not None:
             current_user.PhoneNumber = user_update.PhoneNumber

@@ -8,8 +8,8 @@ class User(Base):
     __tablename__ = "Users"
 
     UserID = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    UserIDcardrName = Column(String(50), nullable=False)
-    UserIDCardrNumber = Column(BigInteger, nullable=True) # Changed to nullable as it might not be available at signup or for existing users
+    UserIDCardName = Column(String(50), nullable=True) # User's real name from ID card
+    UserIDCardNumber = Column(BigInteger, nullable=True) # Changed to nullable as it might not be available at signup or for existing users
     Email = Column(String(30), unique=True, nullable=False, index=True)
     Password = Column(String(255), nullable=False) # Increased length for hashed password
     UserStatus = Column(Boolean, default=True)

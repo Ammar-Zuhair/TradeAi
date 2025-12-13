@@ -5,8 +5,8 @@ Used by Trading-System_First-main to interact with the database.
 
 from database import SessionLocal
 from models.account import Account
-from models.platform_server import PlatformServer
-from models.platform import Platform
+from models.broker_server import BrokerServer
+from models.broker import Broker
 from models.account_symbol_mapping import AccountSymbolMapping
 from models.trading_pair import TradingPair
 from models.trade import Trade
@@ -14,6 +14,7 @@ from models.enums import AccountTypeEnum, TradeTypeEnum
 from typing import Dict, Optional, List
 from datetime import datetime
 from decimal import Decimal
+
 
 
 def get_account_trading_info(account_id: int) -> Optional[Dict]:
@@ -50,32 +51,33 @@ def get_account_trading_info(account_id: int) -> Optional[Dict]:
             print(f"❌ Account {account_id} not found")
             return None
         
-        # Get server name from ServerID
+        # ✅ Get server name from ServerID (required)
         server_name = None
         platform_name = None
         
         if account.ServerID:
             server = db.query(
-                PlatformServer.ServerName,
-                Platform.PlatformName
+                BrokerServer.ServerName,
+                Broker.BrokerName
             ).join(
-                Platform, PlatformServer.PlatformID == Platform.PlatformID
+                Broker, BrokerServer.BrokerID == Broker.BrokerID
             ).filter(
-                PlatformServer.ServerID == account.ServerID
+                BrokerServer.ServerID == account.ServerID
             ).first()
             
             if server:
                 server_name = server.ServerName
-                platform_name = server.PlatformName
-        
-        # Fallback to deprecated field
-        if not server_name:
-            server_name = account.AccountLoginServer
-            platform_name = "Unknown"
+                broker_name = server.BrokerName
+            else:
+                print(f"⚠️  Server with ID {account.ServerID} not found")
+                return None
+        else:
+            print(f"⚠️  Account {account_id} has no ServerID")
+            return None
         
         # Get symbol mappings
         mappings = db.query(
-            TradingPair.OurPairName,
+            TradingPair.PairNameForSearch,
             AccountSymbolMapping.AccountSymbol
         ).join(
             TradingPair, AccountSymbolMapping.TradingPairID == TradingPair.PairID
@@ -84,7 +86,7 @@ def get_account_trading_info(account_id: int) -> Optional[Dict]:
         ).all()
         
         symbol_mappings = {
-            mapping.OurPairName: mapping.AccountSymbol
+            mapping.PairNameForSearch: mapping.AccountSymbol
             for mapping in mappings
         }
         
@@ -93,7 +95,7 @@ def get_account_trading_info(account_id: int) -> Optional[Dict]:
             'login': account.AccountLoginNumber,
             'password': account.AccountLoginPassword,
             'server': server_name,
-            'platform': platform_name,
+            'broker': broker_name,
             'account_type': account.AccountType,
             'balance': float(account.AccountBalance),
             'risk_percentage': float(account.RiskPercentage),
@@ -124,7 +126,7 @@ def get_account_symbol(account_id: int, our_pair_name: str) -> Optional[str]:
             TradingPair, AccountSymbolMapping.TradingPairID == TradingPair.PairID
         ).filter(
             AccountSymbolMapping.AccountID == account_id,
-            TradingPair.OurPairName == our_pair_name
+            TradingPair.PairNameForSearch == our_pair_name
         ).first()
         
         if mapping:
@@ -157,7 +159,7 @@ def get_trading_pair_id(account_id: int, our_pair_name: str) -> Optional[int]:
             TradingPair, AccountSymbolMapping.TradingPairID == TradingPair.PairID
         ).filter(
             AccountSymbolMapping.AccountID == account_id,
-            TradingPair.OurPairName == our_pair_name
+            TradingPair.PairNameForSearch == our_pair_name
         ).first()
         
         return mapping.TradingPairID if mapping else None
@@ -173,7 +175,9 @@ def save_trade_to_db(
     our_pair_name: str,
     lot_size: float,
     open_price: float,
-    open_time: datetime
+    open_time: datetime,
+    sl: float = None,  # ✅ Stop Loss
+    tp: float = None   # ✅ Take Profit
 ) -> bool:
     """
     Save a new trade to the database.
@@ -208,7 +212,9 @@ def save_trade_to_db(
             TradeLotsize=Decimal(str(lot_size)),
             TradeOpenPrice=Decimal(str(open_price)),
             TradeOpenTime=open_time,
-            TradeStatus='Open'
+            TradeSL=Decimal(str(sl)) if sl else None,  # ✅ Stop Loss
+            TradeTP=Decimal(str(tp)) if tp else None,  # ✅ Take Profit
+            TradeStatus=1  # Open
         )
         
         db.add(trade)
@@ -257,11 +263,11 @@ def update_trade_close(
         
         # Update status based on profit/loss
         if profit_loss > 0:
-            trade.TradeStatus = 'Winning'
+            trade.TradeStatus = 2  # Winning
         elif profit_loss < 0:
-            trade.TradeStatus = 'Losing'
+            trade.TradeStatus = 3  # Losing
         else:
-            trade.TradeStatus = 'Closed'
+            trade.TradeStatus = 3  # Closed/Neutral
         
         db.commit()
         

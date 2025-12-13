@@ -4,6 +4,8 @@ import { AccountType } from '@/components/AccountCard';
 import { TradeType } from '@/components/TradeCard';
 import { accountService, tradeService } from '@/services/api';
 import { useAuth } from './AuthContext';
+import { DBAccount, DBTrade } from '@/types/schema';
+import { getTradeTypeLabel, getTradeStatusLabel, getAccountTypeLabel } from '@/utils/formatting';
 
 type AccountsContextType = {
   accounts: AccountType[];
@@ -14,6 +16,7 @@ type AccountsContextType = {
     loginNumber: string;
     password: string;
     server: string;
+    serverId?: number;
     riskPercentage: number;
     strategy?: 'All' | 'FVG + Trend' | 'Voting';
   }) => Promise<{ success: boolean; message: string; mt5Info?: any }>;
@@ -81,15 +84,15 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const response = await accountService.getAccounts(user.token);
 
       // Transform API response to AccountType format
-      const transformedAccounts: AccountType[] = response.map((acc: any) => ({
+      const transformedAccounts: AccountType[] = response.map((acc: DBAccount) => ({
         id: acc.AccountID.toString(),
         name: acc.AccountName || `Account ${acc.AccountLoginNumber}`, // Use AccountName if available
         balance: parseFloat(acc.AccountBalance),
         currency: 'USD',
         profit: 0, // Will be updated below
         openTrades: 0, // Will be updated below
-        server: acc.AccountLoginServer,
-        type: acc.AccountType,
+        server: acc.ServerName || acc.ServerID.toString(), // ✅ Use ServerName from backend
+        type: getAccountTypeLabel(acc.AccountType),
         riskPercentage: parseFloat(acc.RiskPercentage),
         strategy: acc.TradingStrategy,
       }));
@@ -102,17 +105,16 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         try {
           const tradeResponse = await tradeService.getTrades(user.token, parseInt(acc.id));
 
-          const accTrades: TradeType[] = tradeResponse.map((t: any) => ({
+          const accTrades: TradeType[] = tradeResponse.map((t: DBTrade) => ({
             id: t.TradeID.toString(),
-            symbol: t.TradeAsset,
-            type: 'FOREX', // Default
-            direction: t.TradeType,
+            symbol: t.AccountSymbol || t.PairName || t.TradeAsset || `Pair:${t.MappingID}`, // ✅ Use AccountSymbol
+            direction: getTradeTypeLabel(t.TradeType),
             openPrice: parseFloat(t.TradeOpenPrice),
             currentPrice: parseFloat(t.TradeClosePrice || t.TradeOpenPrice), // TradeClosePrice contains current price for open trades
             profit: t.TradeProfitLose ? parseFloat(t.TradeProfitLose) : 0.0,
             openTime: t.TradeOpenTime,
             closeTime: t.TradeCloseTime, // Add closeTime
-            status: t.TradeStatus === 'Open' ? 'OPEN' : 'CLOSED',
+            status: getTradeStatusLabel(t.TradeStatus), // 1=Open, 2=Winning, 3=Losing
             ticket: t.TradeID, // TradeID IS the ticket number
             stopLoss: t.TradeSL ? parseFloat(t.TradeSL) : undefined,
             takeProfit: t.TradeTP ? parseFloat(t.TradeTP) : undefined,
@@ -121,7 +123,7 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
           // Filter only OPEN trades for the context state (history will fetch closed)
           newTrades[acc.id] = accTrades.filter(t => t.status === 'OPEN');
-          newHistory[acc.id] = accTrades.filter(t => t.status === 'CLOSED');
+          newHistory[acc.id] = accTrades.filter(t => t.status !== 'OPEN');
 
           // Update Account Stats
           const openTradesCount = newTrades[acc.id].length;
@@ -154,6 +156,7 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     loginNumber: string;
     password: string;
     server: string;
+    serverId?: number;
     riskPercentage: number;
     strategy?: 'All' | 'FVG + Trend' | 'Voting';
   }): Promise<{ success: boolean; message: string; mt5Info?: any }> => {
@@ -171,7 +174,8 @@ export const AccountsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         AccountName: accountData.accountName,
         AccountLoginNumber: parseInt(accountData.loginNumber),
         AccountLoginPassword: accountData.password,
-        AccountLoginServer: accountData.server,
+        // AccountLoginServer removed. ServerID is sufficient.
+        ServerID: accountData.serverId,
         RiskPercentage: accountData.riskPercentage,
         TradingStrategy: accountData.strategy || 'All',
       });

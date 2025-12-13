@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from database import Base, engine
-from routers import auth, users, accounts, trades, transactions, ai_recommendations, admin, symbol_mapping, platforms
+from routers import auth, users, accounts, trades, transactions, ai_recommendations, admin, symbol_mapping, brokers
 from ai_integration.scheduler import ai_scheduler
 from ai_integration.model_runner import run_ai_models
 from utils.trade_monitor import trade_monitor
@@ -10,8 +10,8 @@ from models.account import Account
 from models.trade import Trade
 from models.transaction import Transaction
 from models.asset_type import AssetType
-from models.platform import Platform
-from models.platform_server import PlatformServer
+from models.broker import Broker
+from models.broker_server import BrokerServer
 from models.trading_pair import TradingPair
 from models.account_symbol_mapping import AccountSymbolMapping
 import os
@@ -89,7 +89,7 @@ app.include_router(transactions.router)
 app.include_router(ai_recommendations.router)
 app.include_router(admin.router)
 app.include_router(symbol_mapping.router)
-app.include_router(platforms.router)
+app.include_router(brokers.router)
 
 
 @app.get("/")
@@ -137,145 +137,165 @@ async def startup_event():
     # Auto-migration for Accounts table (Fix for VARCHAR limit)
     try:
         from sqlalchemy import text
-        with engine.connect() as connection:
-            # Use explicit transaction for DDL
-            with connection.begin():
-                connection.execute(text('ALTER TABLE "Accounts" ALTER COLUMN "AccountLoginPassword" TYPE VARCHAR(255);'))
-                connection.execute(text('ALTER TABLE "Accounts" ALTER COLUMN "AccountLoginServer" TYPE VARCHAR(100);'))
-                # Migration for TradeTicket - REMOVED as we now use TradeID as Ticket
-                # connection.execute(text('ALTER TABLE "Trades" ADD COLUMN IF NOT EXISTS "TradeTicket" INTEGER;'))
-                # Migration for TradeProfitLose (Integer -> Decimal)
-                connection.execute(text('ALTER TABLE "Trades" ALTER COLUMN "TradeProfitLose" TYPE DECIMAL(12, 2);'))
+        
+        def run_migration_step(step_name, sql_commands):
+            """Helper to run migration steps in isolated transactions"""
+            try:
+                with engine.connect() as connection:
+                    with connection.begin():
+                        for sql in sql_commands:
+                            connection.execute(text(sql))
+                # print(f"      ✅ {step_name} applied")
+            except Exception as e:
+                # print(f"      ℹ️ {step_name} skipped/failed: {str(e)}")
+                # We expect some to fail (e.g. column already exists), so we just continue
+                pass
+
+        # 1. Accounts Table Updates
+        run_migration_step("Fix Password Length", [
+            'ALTER TABLE "Accounts" ALTER COLUMN "AccountLoginPassword" TYPE VARCHAR(255);'
+        ])
+
+        run_migration_step("Fix Server Length", [
+            'ALTER TABLE "Accounts" ALTER COLUMN "AccountLoginServer" TYPE VARCHAR(100);'
+        ])
+
+        # 2. Trades Table Updates (ProfitLose)
+        run_migration_step("Trades ProfitLose Type", [
+            'ALTER TABLE "Trades" ALTER COLUMN "TradeProfitLose" TYPE DECIMAL(12, 2);'
+        ])
+
+        # 3. Users Table Updates (Push Notifications)
+        run_migration_step("Users Push Columns", [
+            'ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "PushToken" VARCHAR(255);',
+            'ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "IsNotificationsEnabled" BOOLEAN DEFAULT TRUE;'
+        ])
+
+        run_migration_step("Users ID Card BigInt", [
+            'ALTER TABLE "Users" ALTER COLUMN "UserIDCardNumber" TYPE BIGINT;'
+        ])
+
+        # 4. Trades Table Updates (New Columns)
+        run_migration_step("Trades MappingID", ['ALTER TABLE "Trades" ADD COLUMN IF NOT EXISTS "MappingID" INTEGER;'])
+        
+        run_migration_step("Trades SL/TP", [
+            'ALTER TABLE "Trades" ADD COLUMN IF NOT EXISTS "TradeSL" DECIMAL(12, 5);',
+            'ALTER TABLE "Trades" ADD COLUMN IF NOT EXISTS "TradeTP" DECIMAL(12, 5);'
+        ])
+
+        # 5. TradingPairs Updates
+        # Rename column if exists (Check first)
+        try:
+            with engine.connect() as connection:
+                with connection.begin():
+                    result = connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='TradingPairs' AND column_name='OurPairName'"))
+                    if result.rowcount > 0:
+                        print("      🔄 Renaming OurPairName to PairNameForSearch...")
+                        connection.execute(text('ALTER TABLE "TradingPairs" RENAME COLUMN "OurPairName" TO "PairNameForSearch";'))
+        except Exception:
+            pass
+
+        run_migration_step("TradingPairs Search Column", [
+            'ALTER TABLE "TradingPairs" ADD COLUMN IF NOT EXISTS "PairNameForSearch" VARCHAR(50);',
+            'CREATE INDEX IF NOT EXISTS "ix_trading_pairs_pair_name_for_search" ON "TradingPairs"("PairNameForSearch");'
+        ])
+
+        # 6. Accounts ServerID
+        run_migration_step("Accounts ServerID", [
+            'ALTER TABLE "Accounts" ADD COLUMN IF NOT EXISTS "ServerID" INTEGER;',
+            'CREATE INDEX IF NOT EXISTS "ix_accounts_server_id" ON "Accounts"("ServerID");'
+        ])
+
+        # 7. Accounts AccountName
+        run_migration_step("Accounts AccountName", [
+            'ALTER TABLE "Accounts" ADD COLUMN IF NOT EXISTS "AccountName" VARCHAR(100);'
+        ])
+
+        # 8. Constraints
+        run_migration_step("Accounts Server FK", ['''
+            ALTER TABLE "Accounts" 
+            ADD CONSTRAINT "fk_accounts_server" 
+            FOREIGN KEY ("ServerID") 
+            REFERENCES "PlatformServers"("ServerID") 
+            ON DELETE SET NULL;
+        '''])
+
+        # 9. Enum Conversions (Complex steps)
+        # AccountType
+        run_migration_step("AccountType Migration", [
+            'ALTER TABLE "Accounts" ADD COLUMN IF NOT EXISTS "AccountType_New" INTEGER;',
+            """UPDATE "Accounts" SET "AccountType_New" = CASE 
+                WHEN "AccountType"::TEXT = 'Demo' THEN 1
+                WHEN "AccountType"::TEXT = 'Real' THEN 2
+                ELSE 1 END WHERE "AccountType_New" IS NULL;""",
+            'ALTER TABLE "Accounts" DROP COLUMN IF EXISTS "AccountType" CASCADE;',
+            'ALTER TABLE "Accounts" RENAME COLUMN "AccountType_New" TO "AccountType;',
+            'ALTER TABLE "Accounts" ALTER COLUMN "AccountType" SET NOT NULL;'
+        ])
+
+        # TradeType
+        run_migration_step("TradeType Migration", [
+            'ALTER TABLE "Trades" ADD COLUMN IF NOT EXISTS "TradeType_New" INTEGER;',
+            """UPDATE "Trades" SET "TradeType_New" = CASE 
+                WHEN "TradeType"::TEXT ILIKE 'Buy%' THEN 1
+                WHEN "TradeType"::TEXT ILIKE 'Sell%' THEN 2
+                ELSE 1 END WHERE "TradeType_New" IS NULL;""",
+            'ALTER TABLE "Trades" DROP COLUMN IF EXISTS "TradeType" CASCADE;',
+            'ALTER TABLE "Trades" RENAME COLUMN "TradeType_New" TO "TradeType";',
+            'ALTER TABLE "Trades" ALTER COLUMN "TradeType" SET NOT NULL;'
+        ])
+
+        # TransactionType
+        run_migration_step("TransactionType Migration", [
+            'ALTER TABLE "Transactions" ADD COLUMN IF NOT EXISTS "TransactionType_New" INTEGER;',
+            'UPDATE "Transactions" SET "TransactionType_New" = 1 WHERE "TransactionType_New" IS NULL;',
+            'ALTER TABLE "Transactions" DROP COLUMN IF EXISTS "TransactionType" CASCADE;',
+            'ALTER TABLE "Transactions" RENAME COLUMN "TransactionType_New" TO "TransactionType";',
+            'ALTER TABLE "Transactions" ALTER COLUMN "TransactionType" SET NOT NULL;'
+        ])
+
+        # Transaction SubscriptionExpiry
+        run_migration_step("Transactions SubscriptionExpiry", [
+            'ALTER TABLE "Transactions" ADD COLUMN IF NOT EXISTS "SubscriptionExpiry" TIMESTAMP WITH TIME ZONE;'
+        ])
+
+        # TransactionStatus
+        run_migration_step("TransactionStatus Migration", [
+            'ALTER TABLE "Transactions" ADD COLUMN IF NOT EXISTS "TransactionStatus_New" INTEGER;',
+            """UPDATE "Transactions" SET "TransactionStatus_New" = CASE 
+                WHEN "TransactionStatus"::TEXT ILIKE 'Complet%' THEN 1
+                WHEN "TransactionStatus"::TEXT ILIKE 'Pend%' THEN 2
+                WHEN "TransactionStatus"::TEXT ILIKE 'Fail%' THEN 3
+                ELSE 2 END WHERE "TransactionStatus_New" IS NULL;""",
+            'ALTER TABLE "Transactions" DROP COLUMN IF EXISTS "TransactionStatus" CASCADE;',
+            'ALTER TABLE "Transactions" RENAME COLUMN "TransactionStatus_New" TO "TransactionStatus";',
+            'ALTER TABLE "Transactions" ALTER COLUMN "TransactionStatus" SET DEFAULT 2;'
+        ])
+
+        # 10. Final Constraints and Indexes
+        run_migration_step("Trades Mapping FK", ['''
+            ALTER TABLE "Trades" 
+            ADD CONSTRAINT "fk_trades_mapping" 
+            FOREIGN KEY ("MappingID") 
+            REFERENCES "AccountSymbolMappings"("MappingID") 
+            ON DELETE SET NULL;
+        '''])
+
+        run_migration_step("General Indexes", [
+            'CREATE INDEX IF NOT EXISTS "ix_trades_mapping_id" ON "Trades"("MappingID");',
+            'CREATE INDEX IF NOT EXISTS "ix_platform_servers_platform_id" ON "PlatformServers"("PlatformID");',
+            'CREATE INDEX IF NOT EXISTS "ix_trading_pairs_asset_type_id" ON "TradingPairs"("AssetTypeID");',
+            'CREATE INDEX IF NOT EXISTS "ix_trading_pairs_server_id" ON "TradingPairs"("ServerID");'
+        ])
+
+        run_migration_step("Mapping Indexes", [
+            'CREATE INDEX IF NOT EXISTS "ix_account_symbol_mappings_account_id" ON "AccountSymbolMappings"("AccountID");',
+            'CREATE INDEX IF NOT EXISTS "ix_account_symbol_mappings_trading_pair_id" ON "AccountSymbolMappings"("PairID");'
+        ])
                 
-                # Migration for Users (Push Notifications)
-                connection.execute(text('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "PushToken" VARCHAR(255);'))
-                connection.execute(text('ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "IsNotificationsEnabled" BOOLEAN DEFAULT TRUE;'))
-                
-                # ======== NEW MIGRATION: Lookup Tables for Trade Assets ========
-                # Migration for Trades - Add TradingPairID column (keep TradeAsset for migration)
-                connection.execute(text('ALTER TABLE "Trades" ADD COLUMN IF NOT EXISTS "TradingPairID" INTEGER;'))
-                connection.execute(text('ALTER TABLE "Trades" ALTER COLUMN "TradeAsset" DROP NOT NULL;'))  # Make nullable for migration
-                
-                # Migration for TradingPairs - Add OurPairName column
-                connection.execute(text('ALTER TABLE "TradingPairs" ADD COLUMN IF NOT EXISTS "OurPairName" VARCHAR(50);'))
-                # Create index on OurPairName for faster lookups during analysis
-                connection.execute(text('CREATE INDEX IF NOT EXISTS "ix_trading_pairs_our_pair_name" ON "TradingPairs"("OurPairName");'))
-                
-                # ======== NEW MIGRATION: Convert Text Fields to Integer Enums ========
-                # Migration for Accounts - Add ServerID and convert AccountType to Integer
-                connection.execute(text('ALTER TABLE "Accounts" ADD COLUMN IF NOT EXISTS "ServerID" INTEGER;'))
-                connection.execute(text('CREATE INDEX IF NOT EXISTS "ix_accounts_server_id" ON "Accounts"("ServerID");'))
-                
-                # Add foreign key constraint for ServerID
-                try:
-                    connection.execute(text('''
-                        ALTER TABLE "Accounts" 
-                        ADD CONSTRAINT "fk_accounts_server" 
-                        FOREIGN KEY ("ServerID") 
-                        REFERENCES "PlatformServers"("ServerID") 
-                        ON DELETE SET NULL;
-                    '''))
-                except Exception:
-                    pass  # Constraint already exists
-                
-                # Convert AccountType from String to Integer (if column exists as string)
-                # Note: This requires data migration - we'll add a temp column
-                try:
-                    connection.execute(text('ALTER TABLE "Accounts" ADD COLUMN IF NOT EXISTS "AccountType_New" INTEGER;'))
-                    # Convert existing data: 'Demo' -> 1, 'Real' -> 2
-                    connection.execute(text("""
-                        UPDATE "Accounts" 
-                        SET "AccountType_New" = CASE 
-                            WHEN "AccountType"::TEXT = 'Demo' THEN 1
-                            WHEN "AccountType"::TEXT = 'Real' THEN 2
-                            ELSE 1
-                        END
-                        WHERE "AccountType_New" IS NULL;
-                    """))
-                    # Drop old column and rename new one
-                    connection.execute(text('ALTER TABLE "Accounts" DROP COLUMN IF EXISTS "AccountType" CASCADE;'))
-                    connection.execute(text('ALTER TABLE "Accounts" RENAME COLUMN "AccountType_New" TO "AccountType";'))
-                    connection.execute(text('ALTER TABLE "Accounts" ALTER COLUMN "AccountType" SET NOT NULL;'))
-                except Exception as e:
-                    print(f"      AccountType migration skipped: {e}")
-                
-                # Convert TradeType from String to Integer
-                try:
-                    connection.execute(text('ALTER TABLE "Trades" ADD COLUMN IF NOT EXISTS "TradeType_New" INTEGER;'))
-                    # Convert existing data: 'Buy' -> 1, 'Sell' -> 2
-                    connection.execute(text("""
-                        UPDATE "Trades" 
-                        SET "TradeType_New" = CASE 
-                            WHEN "TradeType"::TEXT ILIKE 'Buy%' THEN 1
-                            WHEN "TradeType"::TEXT ILIKE 'Sell%' THEN 2
-                            ELSE 1
-                        END
-                        WHERE "TradeType_New" IS NULL;
-                    """))
-                    connection.execute(text('ALTER TABLE "Trades" DROP COLUMN IF EXISTS "TradeType" CASCADE;'))
-                    connection.execute(text('ALTER TABLE "Trades" RENAME COLUMN "TradeType_New" TO "TradeType";'))
-                    connection.execute(text('ALTER TABLE "Trades" ALTER COLUMN "TradeType" SET NOT NULL;'))
-                except Exception as e:
-                    print(f"      TradeType migration skipped: {e}")
-                
-                # Convert TransactionType from String to Integer
-                try:
-                    connection.execute(text('ALTER TABLE "Transactions" ADD COLUMN IF NOT EXISTS "TransactionType_New" INTEGER;'))
-                    # For now, set default to 1 (Month) - will need manual update based on business logic
-                    connection.execute(text('UPDATE "Transactions" SET "TransactionType_New" = 1 WHERE "TransactionType_New" IS NULL;'))
-                    connection.execute(text('ALTER TABLE "Transactions" DROP COLUMN IF EXISTS "TransactionType" CASCADE;'))
-                    connection.execute(text('ALTER TABLE "Transactions" RENAME COLUMN "TransactionType_New" TO "TransactionType";'))
-                    connection.execute(text('ALTER TABLE "Transactions" ALTER COLUMN "TransactionType" SET NOT NULL;'))
-                except Exception as e:
-                    print(f"      TransactionType migration skipped: {e}")
-                
-                # Convert TransactionStatus from String to Integer
-                try:
-                    connection.execute(text('ALTER TABLE "Transactions" ADD COLUMN IF NOT EXISTS "TransactionStatus_New" INTEGER;'))
-                    # Convert existing data: 'Completed' -> 1, 'Pending' -> 2, 'Failed' -> 3
-                    connection.execute(text("""
-                        UPDATE "Transactions" 
-                        SET "TransactionStatus_New" = CASE 
-                            WHEN "TransactionStatus"::TEXT ILIKE 'Complet%' THEN 1
-                            WHEN "TransactionStatus"::TEXT ILIKE 'Pend%' THEN 2
-                            WHEN "TransactionStatus"::TEXT ILIKE 'Fail%' THEN 3
-                            ELSE 2
-                        END
-                        WHERE "TransactionStatus_New" IS NULL;
-                    """))
-                    connection.execute(text('ALTER TABLE "Transactions" DROP COLUMN IF EXISTS "TransactionStatus" CASCADE;'))
-                    connection.execute(text('ALTER TABLE "Transactions" RENAME COLUMN "TransactionStatus_New" TO "TransactionStatus";'))
-                    connection.execute(text('ALTER TABLE "Transactions" ALTER COLUMN "TransactionStatus" SET DEFAULT 2;'))
-                except Exception as e:
-                    print(f"      TransactionStatus migration skipped: {e}")
-                
-                # Add foreign key constraint if it doesn't exist
-                # Note: PostgreSQL won't error if constraint already exists
-                try:
-                    connection.execute(text('''
-                        ALTER TABLE "Trades" 
-                        ADD CONSTRAINT "fk_trades_trading_pair" 
-                        FOREIGN KEY ("TradingPairID") 
-                        REFERENCES "TradingPairs"("PairID") 
-                        ON DELETE RESTRICT;
-                    '''))
-                except Exception:
-                    pass  # Constraint already exists
-                
-                # Create indexes on foreign key columns for better query performance
-                connection.execute(text('CREATE INDEX IF NOT EXISTS "ix_trades_trading_pair_id" ON "Trades"("TradingPairID");'))
-                connection.execute(text('CREATE INDEX IF NOT EXISTS "ix_platform_servers_platform_id" ON "PlatformServers"("PlatformID");'))
-                connection.execute(text('CREATE INDEX IF NOT EXISTS "ix_trading_pairs_asset_type_id" ON "TradingPairs"("AssetTypeID");'))
-                connection.execute(text('CREATE INDEX IF NOT EXISTS "ix_trading_pairs_server_id" ON "TradingPairs"("ServerID");'))
-                
-                # Create index on AccountSymbolMappings foreign keys
-                connection.execute(text('CREATE INDEX IF NOT EXISTS "ix_account_symbol_mappings_account_id" ON "AccountSymbolMappings"("AccountID");'))
-                connection.execute(text('CREATE INDEX IF NOT EXISTS "ix_account_symbol_mappings_trading_pair_id" ON "AccountSymbolMappings"("TradingPairID");'))
-                
-        print("Database: ✅ Applied schema migration for Accounts, Trades, Users, and Lookup Tables")
+        print("Database: ✅ Applied schema migrations (if needed)")
     except Exception as e:
-        # Ignore if it fails (likely already applied or table doesn't exist yet)
-        print(f"Database: ℹ️ Schema migration skipped: {str(e)}")
+        print(f"Database: ℹ️ Schema migration process finished with notes: {str(e)}")
         
     print(f"Authentication: JWT enabled")
     print(f"AI Integration: Enabled")

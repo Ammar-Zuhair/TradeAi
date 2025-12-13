@@ -43,3 +43,61 @@ async def send_admin_message(
                 count += 1
                 
     return {"message": f"Message sent to {count} users"}
+
+
+# ============= Trading Pair Management =============
+
+class TradingPairCreate(BaseModel):
+    pair_name: str
+    asset_type_id: int
+
+@router.post("/pairs")
+async def create_trading_pair(
+    request: TradingPairCreate,
+    db: Session = Depends(get_db),
+    # current_user: User = Depends(get_current_user) # Uncomment in production
+):
+    """
+    Add a new trading pair and automatically map it to all active accounts.
+    """
+    try:
+        from models.trading_pair import TradingPair
+        from utils.mt5_symbols import update_mappings_for_new_pair
+        
+        # Check if exists
+        exists = db.query(TradingPair).filter(
+            TradingPair.PairNameForSearch == request.pair_name
+        ).first()
+        
+        if exists:
+            # If it already exists, maybe we just want to re-run mapping?
+            # For now, let's allow re-running mapping even if pair exists
+            pair = exists
+            created = False
+        else:
+            # Create new pair
+            pair = TradingPair(
+                PairNameForSearch=request.pair_name,
+                AssetTypeID=request.asset_type_id
+            )
+            db.add(pair)
+            db.commit()
+            db.refresh(pair)
+            created = True
+        
+        # Trigger Auto-Mapping
+        print(f"🚀 Admin added pair '{request.pair_name}'. Triggering auto-mapping...")
+        stats = update_mappings_for_new_pair(pair.PairID, request.pair_name)
+        
+        return {
+            "message": "Trading pair processed successfully",
+            "created": created,
+            "pair_id": pair.PairID,
+            "mapping_stats": stats
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create trading pair: {str(e)}"
+        )

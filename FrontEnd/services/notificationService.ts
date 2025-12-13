@@ -39,9 +39,8 @@ export async function registerForPushNotificationsAsync() {
 
         // Get Expo Push Token
         try {
-            token = (await Notifications.getExpoPushTokenAsync({
-                projectId: 'de080c35-84e9-4c92-b44a-2d7ad9c50644' // Optional, but good practice
-            })).data;
+            // Remove hardcoded projectId which was incorrect
+            token = (await Notifications.getExpoPushTokenAsync()).data;
             console.log("📲 Push Token:", token);
         } catch (e) {
             console.log("Error getting push token:", e);

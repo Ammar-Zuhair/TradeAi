@@ -11,7 +11,6 @@ class AccountBase(BaseModel):
     AccountName: Optional[str] = None
     AccountType: Optional[int] = 1  # 1=Demo, 2=Real
     ServerID: Optional[int] = None  # Foreign key to PlatformServers
-    AccountLoginServer: Optional[str] = None  # DEPRECATED: Use ServerID instead
     AccountLoginNumber: Optional[int] = None
     TradingStrategy: Optional[TradingStrategyType] = "All"
 
@@ -44,7 +43,6 @@ class AccountUpdate(BaseModel):
     AccountName: Optional[str] = None
     AccountType: Optional[int] = None  # 1=Demo, 2=Real
     ServerID: Optional[int] = None
-    AccountLoginServer: Optional[str] = None
     AccountLoginNumber: Optional[int] = None
     AccountLoginPassword: Optional[str] = None
     AccountBalance: Optional[Decimal] = None
@@ -75,6 +73,7 @@ class AccountResponse(AccountBase):
     AccountBalance: Decimal
     RiskPercentage: Decimal
     TradingStrategy: str
+    ServerName: Optional[str] = None  # ✅ Added for display
     AccountCreationDate: Optional[datetime] = None
 
     class Config:

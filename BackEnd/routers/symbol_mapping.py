@@ -42,7 +42,6 @@ class AccountSymbolMappingResponse(BaseModel):
     mapping_id: int
     account_symbol: str
     our_pair_name: str
-    pair_name: str
     trading_pair_id: int
     
     class Config:
@@ -128,7 +127,7 @@ async def get_symbol_mapping_suggestions(
     
     # Get our standardized pair names
     trading_pairs = db.query(TradingPair).all()
-    our_pair_names = list(set([tp.OurPairName for tp in trading_pairs if tp.OurPairName]))
+    our_pair_names = list(set([tp.PairNameForSearch for tp in trading_pairs if tp.PairNameForSearch]))
     
     # Generate suggestions
     suggestions = []
@@ -141,7 +140,7 @@ async def get_symbol_mapping_suggestions(
         if suggested_name:
             # Find the trading pair ID
             trading_pair = db.query(TradingPair).filter(
-                TradingPair.OurPairName == suggested_name
+                TradingPair.PairNameForSearch == suggested_name
             ).first()
             
             if trading_pair:
@@ -235,11 +234,10 @@ async def get_account_symbol_mappings(
     mappings = db.query(
         AccountSymbolMapping.MappingID,
         AccountSymbolMapping.AccountSymbol,
-        TradingPair.OurPairName,
-        TradingPair.PairName,
+        TradingPair.PairNameForSearch,
         TradingPair.PairID
     ).join(
-        TradingPair, AccountSymbolMapping.TradingPairID == TradingPair.PairID
+        TradingPair, AccountSymbolMapping.PairID == TradingPair.PairID
     ).filter(
         AccountSymbolMapping.AccountID == account_id
     ).all()
@@ -248,8 +246,7 @@ async def get_account_symbol_mappings(
         {
             'mapping_id': m.MappingID,
             'account_symbol': m.AccountSymbol,
-            'our_pair_name': m.OurPairName,
-            'pair_name': m.PairName,
+            'our_pair_name': m.PairNameForSearch, # Map to frontend field
             'trading_pair_id': m.PairID
         }
         for m in mappings

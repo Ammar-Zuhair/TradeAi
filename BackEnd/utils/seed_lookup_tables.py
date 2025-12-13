@@ -11,7 +11,51 @@ from models.asset_type import AssetType
 from models.platform import Platform
 from models.platform_server import PlatformServer
 from models.trading_pair import TradingPair
+from models.market_analysis_config import MarketAnalysisConfig
+from models.account import Account
 from sqlalchemy import text
+
+
+def seed_analysis_config(db):
+    """Seed MarketAnalysisConfig table"""
+    print("\n" + "="*60)
+    print("Seeding Market Analysis Configuration...")
+    print("="*60)
+    
+    # 1. Default GOLD configuration
+    # Find a Real account to use as default data source
+    # We prefer an account that has 'Real' type (2) and looks active
+    data_source_acc = db.query(Account).filter(Account.AccountType == 2).first()
+    
+    if not data_source_acc:
+        # Fallback to any account if no Real account found
+        data_source_acc = db.query(Account).first()
+        
+    if data_source_acc:
+        config_data = {
+            "OurPairName": "GOLD",
+            "DataSourceAccountID": data_source_acc.AccountID,
+            "IsActive": True,
+            "Timeframe": "M15",
+            "StrategyName": "Voting"
+        }
+        
+        # Check if exists
+        existing = db.query(MarketAnalysisConfig).filter(
+            MarketAnalysisConfig.OurPairName == "GOLD"
+        ).first()
+        
+        if not existing:
+            config = MarketAnalysisConfig(**config_data)
+            db.add(config)
+            print(f"  ✅ Added Config: GOLD (Source Account: {data_source_acc.AccountID})")
+        else:
+            print(f"  ⏭️  Skipped Config: GOLD (already exists)")
+    else:
+        print("  ⚠️ Skipped Config: No accounts available to set as data source.")
+            
+    db.commit()
+    print("="*60)
 
 
 def seed_asset_types(db):
@@ -145,46 +189,38 @@ def seed_trading_pairs(db):
     
     pairs = []
     
-    if gold and mt4_real:
+    if gold:
         pairs.append({
             "AssetTypeID": gold.AssetTypeID, 
-            "ServerID": mt4_real.ServerID, 
-            "OurPairName": "GOLD",
-            "PairName": "XAUUSD"
+            "PairNameForSearch": "GOLD",
         })
     
-    if forex and mt4_real:
+    if forex:
         pairs.extend([
-            {"AssetTypeID": forex.AssetTypeID, "ServerID": mt4_real.ServerID, "OurPairName": "EURUSD", "PairName": "EURUSD"},
-            {"AssetTypeID": forex.AssetTypeID, "ServerID": mt4_real.ServerID, "OurPairName": "GBPUSD", "PairName": "GBPUSD"},
-            {"AssetTypeID": forex.AssetTypeID, "ServerID": mt4_real.ServerID, "OurPairName": "USDJPY", "PairName": "USDJPY"},
+            {"AssetTypeID": forex.AssetTypeID, "PairNameForSearch": "EURUSD"},
+            {"AssetTypeID": forex.AssetTypeID, "PairNameForSearch": "GBPUSD"},
+            {"AssetTypeID": forex.AssetTypeID, "PairNameForSearch": "USDJPY"},
         ])
     
-    if crypto and binance_main:
+    if crypto:
         pairs.extend([
-            {"AssetTypeID": crypto.AssetTypeID, "ServerID": binance_main.ServerID, "OurPairName": "BTCUSDT", "PairName": "BTCUSDT"},
-            {"AssetTypeID": crypto.AssetTypeID, "ServerID": binance_main.ServerID, "OurPairName": "ETHUSDT", "PairName": "ETHUSDT"},
+            {"AssetTypeID": crypto.AssetTypeID, "PairNameForSearch": "BTCUSDT"},
+            {"AssetTypeID": crypto.AssetTypeID, "PairNameForSearch": "ETHUSDT"},
         ])
     
     for pair_data in pairs:
         # Check if already exists
         existing = db.query(TradingPair).filter(
-            TradingPair.ServerID == pair_data["ServerID"],
-            TradingPair.PairName == pair_data["PairName"]
+            TradingPair.PairNameForSearch == pair_data["PairNameForSearch"]
         ).first()
         
         if not existing:
             pair = TradingPair(**pair_data)
             db.add(pair)
             asset_name = db.query(AssetType).filter(AssetType.AssetTypeID == pair_data["AssetTypeID"]).first().TypeName
-            print(f"  ✅ Added TradingPair: {pair_data['OurPairName']} -> {pair_data['PairName']} ({asset_name})")
+            print(f"  ✅ Added TradingPair: {pair_data['PairNameForSearch']} ({asset_name})")
         else:
-            # Update OurPairName if missing
-            if not existing.OurPairName:
-                existing.OurPairName = pair_data["OurPairName"]
-                print(f"  🔄 Updated TradingPair: {pair_data['PairName']} with OurPairName={pair_data['OurPairName']}")
-            else:
-                print(f"  ⏭️  Skipped TradingPair: {pair_data['PairName']} (already exists)")
+            print(f"  ⏭️  Skipped TradingPair: {pair_data['PairNameForSearch']} (already exists)")
     
     db.commit()
     print("="*60)
@@ -203,6 +239,7 @@ def main():
         seed_platforms(db)
         seed_platform_servers(db)
         seed_trading_pairs(db)
+        seed_analysis_config(db)
         
         print("\n" + "="*60)
         print("✅ SEED COMPLETED SUCCESSFULLY")

@@ -33,6 +33,7 @@ export default function EditProfileScreen() {
         phoneNumber: user?.phoneNumber || '',
         address: user?.address || '',
         dateOfBirth: user?.dateOfBirth || '',
+        email: user?.email || '',
     });
 
     const [isLoading, setIsLoading] = useState(false);
@@ -47,6 +48,7 @@ export default function EditProfileScreen() {
                 phoneNumber: user.phoneNumber || '',
                 address: user.address || '',
                 dateOfBirth: user.dateOfBirth || '',
+                email: user.email || '',
             });
         }
     }, [user]);
@@ -63,13 +65,13 @@ export default function EditProfileScreen() {
             const updateData: any = {};
 
             if (formData.name) {
-                updateData.UserIDcardrName = formData.name;
+                updateData.UserIDCardName = formData.name; // ✅ Corrected Key
             }
 
             if (formData.idCardNumber) {
                 const idNumber = parseInt(formData.idCardNumber);
                 if (!isNaN(idNumber)) {
-                    updateData.UserIDCardrNumber = idNumber;
+                    updateData.UserIDCardNumber = idNumber.toString(); // ✅ Corrected Key & Type (Schema expects string)
                 }
             }
 
@@ -95,8 +97,8 @@ export default function EditProfileScreen() {
             // Update user in AuthContext and AsyncStorage
             const newUserData = {
                 ...user,
-                name: updatedUser.UserIDcardrName,
-                idCardNumber: updatedUser.UserIDCardrNumber?.toString(),
+                name: updatedUser.UserIDCardName, // ✅ Corrected
+                idCardNumber: updatedUser.UserIDCardNumber ? updatedUser.UserIDCardNumber.toString() : undefined, // ✅ Corrected
                 phoneNumber: updatedUser.PhoneNumber,
                 address: updatedUser.Address,
                 dateOfBirth: updatedUser.DateOfBirth,
@@ -152,6 +154,21 @@ export default function EditProfileScreen() {
                     showsVerticalScrollIndicator={false}
                 >
                     <Animated.View entering={FadeInDown.delay(200).springify()} style={styles.form}>
+
+                        {/* Email Address (Read Only) */}
+                        <View style={styles.inputGroup}>
+                            <Text style={[styles.label, themeStyles.label]}>Email</Text>
+                            <View style={[styles.inputContainer, themeStyles.inputContainer, { opacity: 0.7 }]}>
+                                <User size={20} color={themeStyles.icon} style={styles.inputIcon} />
+                                <TextInput
+                                    style={[styles.input, themeStyles.input]}
+                                    value={user?.email} // Read directly from user object
+                                    editable={false}
+                                    placeholder="Email"
+                                    placeholderTextColor={themeStyles.placeholder}
+                                />
+                            </View>
+                        </View>
 
                         {/* Full Name */}
                         <View style={styles.inputGroup}>

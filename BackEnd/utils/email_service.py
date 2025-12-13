@@ -47,9 +47,9 @@ def send_email_otp(to_email: str, otp_code: str):
         server.send_message(msg)
         server.quit()
         
-        print(f"📧 Email sent successfully to {to_email}")
+        print(f"📧 Email sent successfully to {to_email}", flush=True)
         return True
         
     except Exception as e:
-        print(f"❌ Failed to send email: {e}")
+        print(f"❌ Failed to send email: {e}", flush=True)
         return False

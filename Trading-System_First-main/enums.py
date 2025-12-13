@@ -29,3 +29,10 @@ class TradeTypeEnum(IntEnum):
     """Trade type enumeration"""
     BUY = 1
     SELL = 2
+
+
+class TradeStatusEnum(IntEnum):
+    """Trade status enumeration"""
+    OPEN = 1
+    WINNING = 2
+    LOSING = 3
